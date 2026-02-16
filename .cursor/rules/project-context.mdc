@@ -1,0 +1,63 @@
+---
+description: Core project context for cursor-usage-tracker — architecture, data flow, key files
+alwaysApply: true
+---
+
+# cursor-usage-tracker — Project Context
+
+Open-source Cursor IDE usage monitoring, anomaly detection, and alerting for enterprise teams.
+
+## Tech Stack
+
+- Next.js (App Router, Turbopack) + TypeScript strict
+- SQLite via better-sqlite3 (zero-config, file at `data/tracker.db`)
+- Recharts for charts, Tailwind CSS for styling
+- Vitest for tests, ESLint 9 flat config, Prettier
+- Docker (multi-stage Dockerfile + docker-compose.yml)
+
+## Architecture
+
+```
+Cursor Enterprise APIs → Collector (src/lib/collector.ts) → SQLite (src/lib/db.ts)
+                                                                ↓
+                                                    Detection Engine (src/lib/anomaly/)
+                                                                ↓
+                                                    Alerts: Slack + Email (src/lib/alerts/)
+                                                                ↓
+                                                    Dashboard (src/app/ pages)
+```
+
+Single cron endpoint `POST /api/cron` does: collect → detect → alert in one call.
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/lib/types.ts` | All shared types + DetectionConfig + DEFAULT_CONFIG |
+| `src/lib/cursor-client.ts` | Cursor API client (Admin + Analytics), pagination, rate-limit retry |
+| `src/lib/db.ts` | SQLite schema, all queries, dashboard stats, user stats |
+| `src/lib/collector.ts` | Data collection pipeline (members, daily usage, spending, events) |
+| `src/lib/anomaly/detector.ts` | Orchestrator — runs all 3 detection layers, deduplicates |
+| `src/lib/anomaly/thresholds.ts` | Layer 1: static limits (spend, requests, tokens) |
+| `src/lib/anomaly/zscore.ts` | Layer 2: statistical z-score vs team mean |
+| `src/lib/anomaly/trends.ts` | Layer 3: personal spikes, drift above P75, model shift |
+| `src/lib/incidents.ts` | Incident lifecycle: create, alert, acknowledge, resolve + MTTD/MTTI/MTTR |
+| `src/lib/alerts/slack.ts` | Slack webhook with block-kit messages |
+| `src/lib/alerts/email.ts` | SMTP email with HTML templates |
+| `src/app/api/cron/route.ts` | Main cron endpoint (collect + detect + alert) |
+
+## Dashboard Pages
+
+- `/` — Team overview: stat cards, spend bar chart, usage line chart, members table
+- `/users/[email]` — Per-user: token timeline, model pie chart, feature breakdown, anomaly history
+- `/anomalies` — MTTD/MTTI/MTTR metrics, open incidents (acknowledge/resolve), anomaly table
+- `/settings` — Configurable detection thresholds
+
+## Database Tables
+
+members, daily_usage, spending, usage_events, anomalies, incidents, config, collection_log
+
+## Important Caveats
+
+- API response shapes may not exactly match the live Cursor API. If real responses differ, update `src/lib/types.ts` and `src/lib/cursor-client.ts`.
+- Trend detection can produce duplicate dedup keys (spike + drift both emit `trend:tokens` for same user) — first one wins, second is silently dropped.

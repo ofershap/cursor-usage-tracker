@@ -1,0 +1,54 @@
+---
+description: Coding conventions and patterns for cursor-usage-tracker
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# Coding Conventions
+
+## Imports
+
+- NO `.js` extensions on internal imports — Next.js Turbopack bundler resolution doesn't support them
+- Use `@/` path alias for imports from `src/` (configured in tsconfig.json)
+- Use `import type` for type-only imports
+
+```typescript
+// CORRECT
+import { getDb } from "@/lib/db";
+import type { Anomaly } from "@/lib/types";
+
+// WRONG — will break Next.js build
+import { getDb } from "./db.js";
+```
+
+## Database
+
+- All DB access goes through `src/lib/db.ts` — never import better-sqlite3 directly in pages/routes
+- Use `getDb()` singleton — it initializes schema on first call
+- Use transactions for batch inserts: `db.transaction(() => { ... })()`
+- SQLite column names use snake_case; TypeScript types use camelCase
+
+## API Routes
+
+- All API routes use `export const dynamic = "force-dynamic"` (data is always fresh from SQLite)
+- Cron endpoint requires `x-cron-secret` header or `?secret=` query param
+- Use Next.js App Router async params pattern: `{ params }: { params: Promise<{ id: string }> }`
+
+## Components
+
+- Dashboard pages: server component (page.tsx) fetches data, passes to client component (*-client.tsx)
+- Charts are always client components ("use client")
+- Use Tailwind CSS with zinc color palette (dark theme)
+- No shadcn/ui installed — components are hand-rolled
+
+## Anomaly Detection
+
+- Three layers: thresholds → zscore → trends (all in `src/lib/anomaly/`)
+- `detector.ts` orchestrates all three, deduplicates by `userEmail:type:metric` key
+- New anomalies get inserted; existing ones that no longer fire get auto-resolved
+
+## Testing
+
+- Tests in `tests/` directory, use Vitest
+- Anomaly tests create their own test SQLite DB (not the main db.ts singleton)
+- API client tests mock `globalThis.fetch`
