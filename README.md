@@ -114,7 +114,16 @@ Anomaly Detected ──→ Alert Sent ──→ Acknowledged ──→ Resolved
 | Admin API key          | Cursor dashboard → Settings → Advanced → Admin API Keys |
 | Node.js 18+            | [nodejs.org](https://nodejs.org)                        |
 
-### 1. Clone and install
+### 1. Set up
+
+**Option A: One command**
+
+```bash
+npx cursor-usage-tracker my-tracker
+cd my-tracker
+```
+
+**Option B: Manual clone**
 
 ```bash
 git clone https://github.com/ofershap/cursor-usage-tracker.git
