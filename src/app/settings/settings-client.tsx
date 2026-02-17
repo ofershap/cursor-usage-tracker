@@ -129,41 +129,41 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
           />
         </Section>
 
-        <Section title="Trend Detection" description="Detect sudden spikes and sustained drift">
+        <Section title="Spend Trend Detection" description="Detect spend spikes and cycle outliers">
           <Field
-            label="Spike multiplier"
-            value={config.trends.spikeMultiplier}
+            label="Spend spike multiplier"
+            value={config.trends.spendSpikeMultiplier}
             onChange={(v) =>
               setConfig({
                 ...config,
-                trends: { ...config.trends, spikeMultiplier: v },
+                trends: { ...config.trends, spendSpikeMultiplier: v },
               })
             }
             step={0.5}
-            hint="today > N × avg"
+            hint="today spend > N × avg"
           />
           <Field
             label="Spike lookback"
-            value={config.trends.spikeLookbackDays}
+            value={config.trends.spendSpikeLookbackDays}
             onChange={(v) =>
               setConfig({
                 ...config,
-                trends: { ...config.trends, spikeLookbackDays: v },
+                trends: { ...config.trends, spendSpikeLookbackDays: v },
               })
             }
             unit="days"
           />
           <Field
-            label="Drift threshold"
-            value={config.trends.driftDaysAboveP75}
+            label="Cycle outlier multiplier"
+            value={config.trends.cycleOutlierMultiplier}
             onChange={(v) =>
               setConfig({
                 ...config,
-                trends: { ...config.trends, driftDaysAboveP75: v },
+                trends: { ...config.trends, cycleOutlierMultiplier: v },
               })
             }
-            unit="days"
-            hint="consecutive > P75"
+            step={0.5}
+            hint="cycle spend > N × team median"
           />
         </Section>
 

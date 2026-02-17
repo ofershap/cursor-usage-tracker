@@ -745,7 +745,13 @@ export function getConfig(): DetectionConfig {
     | undefined;
 
   if (!row) return DEFAULT_CONFIG;
-  return JSON.parse(row.value) as DetectionConfig;
+  const stored = JSON.parse(row.value) as Partial<DetectionConfig>;
+  return {
+    thresholds: { ...DEFAULT_CONFIG.thresholds, ...stored.thresholds },
+    zscore: { ...DEFAULT_CONFIG.zscore, ...stored.zscore },
+    trends: { ...DEFAULT_CONFIG.trends, ...stored.trends },
+    cronIntervalMinutes: stored.cronIntervalMinutes ?? DEFAULT_CONFIG.cronIntervalMinutes,
+  };
 }
 
 export function saveConfig(config: DetectionConfig): void {

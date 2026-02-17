@@ -15,8 +15,6 @@ function formatValue(metric: string, value: number): string {
       return `${(value / 1_000_000).toFixed(2)}M tokens`;
     case "requests":
       return `${value.toFixed(0)} requests`;
-    case "model_shift":
-      return `${value.toFixed(0)}%`;
     default:
       return `${value}`;
   }
@@ -60,10 +58,16 @@ export async function sendEmailAlert(
   options: { to?: string; dashboardUrl?: string } = {},
 ): Promise<boolean> {
   const resend = getClient();
-  if (!resend) return false;
+  if (!resend) {
+    console.warn("[email] Skipping alert — missing RESEND_API_KEY");
+    return false;
+  }
 
   const to = options.to ?? process.env.ALERT_EMAIL_TO;
-  if (!to) return false;
+  if (!to) {
+    console.warn("[email] Skipping alert — missing ALERT_EMAIL_TO");
+    return false;
+  }
 
   const from = process.env.RESEND_FROM ?? "Cursor Tracker <alerts@resend.dev>";
   const severityPrefix = anomaly.severity === "critical" ? "[CRITICAL]" : "[WARNING]";
@@ -76,12 +80,13 @@ export async function sendEmailAlert(
       html: buildHtml(anomaly, incident, options.dashboardUrl),
     });
     if (error) {
-      console.error("[email] Resend error:", error.message);
+      console.error("[email] Resend API error:", error.message);
       return false;
     }
+    console.log(`[email] Alert sent to ${to} for ${anomaly.userEmail}`);
     return true;
-  } catch {
-    console.error("[email] Failed to send alert email");
+  } catch (err) {
+    console.error("[email] Failed to send:", err instanceof Error ? err.message : err);
     return false;
   }
 }

@@ -50,13 +50,12 @@ Developer uses Cursor → API collects data hourly → Engine detects anomaly �
 
 ### How It Works
 
-| What happens                                 | Example                                                 |
-| -------------------------------------------- | ------------------------------------------------------- |
-| A developer exceeds the spend limit          | `Bob spent $82 this cycle (limit: $50)` → Slack alert   |
-| Someone's usage is 3x their personal average | `Token spike: 4.2x Alice's 7-day average` → Slack alert |
-| A user is statistically far from the team    | `Bob: 2.8 std devs above team mean` → Slack alert       |
-| Someone shifts to expensive models           | `Opus usage jumped from 5% to 45%` → Slack alert        |
-| Usage drifts above team P75 for days         | `Above team P75 for 5 of last 6 days` → Slack alert     |
+| What happens                               | Example                                                                       |
+| ------------------------------------------ | ----------------------------------------------------------------------------- |
+| A developer exceeds the spend limit        | `Bob spent $82 this cycle (limit: $50)` → Slack alert                         |
+| Someone's daily spend spikes               | `Alice: daily spend spiked to $214 (4.2x her 7-day avg of $51)` → Slack alert |
+| A user's cycle spend is far above the team | `Bob: cycle spend $957 is 5.1x the team median ($188)` → Slack alert          |
+| A user is statistically far from the team  | `Bob: daily spend $214 is 3.2σ above team mean ($42)` → Slack alert           |
 
 Every alert includes who, what model, how much, and a link to their dashboard page so you can investigate immediately.
 
@@ -66,11 +65,11 @@ Every alert includes who, what model, how much, and a link to their dashboard pa
 
 ### Three-Layer Anomaly Detection
 
-| Layer          | Method        | What it catches                                                             |
-| -------------- | ------------- | --------------------------------------------------------------------------- |
-| **Thresholds** | Static limits | Optional hard caps on spend, requests, or tokens (disabled by default)      |
-| **Z-Score**    | Statistical   | User 2+ standard deviations above team mean                                 |
-| **Trends**     | Behavioral    | Personal spikes, sustained drift above P75, model shift to expensive models |
+| Layer          | Method        | What it catches                                                               |
+| -------------- | ------------- | ----------------------------------------------------------------------------- |
+| **Thresholds** | Static limits | Optional hard caps on spend, requests, or tokens (disabled by default)        |
+| **Z-Score**    | Statistical   | User daily spend 2.5+ standard deviations above team mean (active users only) |
+| **Trends**     | Spend-based   | Daily spend spikes vs personal average, cycle spend outliers vs team median   |
 
 ### Incident Lifecycle (MTTD / MTTI / MTTR)
 
@@ -90,7 +89,7 @@ Anomaly Detected ──→ Alert Sent ──→ Acknowledged ──→ Resolved
 
 ### Rich Alerting
 
-- **Slack**: Block Kit messages via bot token (`chat.postMessage`) with severity, user, model, value vs threshold, and dashboard links
+- **Slack**: Block Kit messages via bot token (`chat.postMessage`) with severity, user, model, value vs threshold, and dashboard links. Batches alerts automatically (individual messages for 1-3 anomalies, single summary for 4+).
 - **Email**: HTML-formatted alerts via [Resend](https://resend.com) (one API key, no SMTP config)
 
 ### Web Dashboard
@@ -254,15 +253,16 @@ flowchart TB
 
 All detection thresholds are configurable via the Settings page or the API:
 
-| Setting              | Default | What it does                                      |
-| -------------------- | ------- | ------------------------------------------------- |
-| Max spend per cycle  | 0 (off) | Alert when a user exceeds this in a billing cycle |
-| Max requests per day | 0 (off) | Alert on excessive daily request count            |
-| Max tokens per day   | 0 (off) | Alert on excessive daily token consumption        |
-| Z-score multiplier   | 2.5     | How many standard deviations above mean to flag   |
-| Z-score window       | 7 days  | Historical window for statistical comparison      |
-| Spike multiplier     | 3.0x    | Alert when today > N× user's personal average     |
-| Drift days above P75 | 3       | Consecutive days above team P75 to flag           |
+| Setting                  | Default | What it does                                                   |
+| ------------------------ | ------- | -------------------------------------------------------------- |
+| Max spend per cycle      | 0 (off) | Alert when a user exceeds this in a billing cycle              |
+| Max requests per day     | 0 (off) | Alert on excessive daily request count                         |
+| Max tokens per day       | 0 (off) | Alert on excessive daily token consumption                     |
+| Z-score multiplier       | 2.5     | How many standard deviations above mean to flag (spend + reqs) |
+| Z-score window           | 7 days  | Historical window for statistical comparison                   |
+| Spend spike multiplier   | 5.0x    | Alert when today's spend > N× user's personal daily average    |
+| Spend spike lookback     | 7 days  | How many days of history to compare against                    |
+| Cycle outlier multiplier | 10.0x   | Alert when cycle spend > N× team median (active users only)    |
 
 ---
 

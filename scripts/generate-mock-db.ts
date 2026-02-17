@@ -458,18 +458,18 @@ function run() {
         {
           type: "trend",
           severity: "warning",
-          metric: "tokens",
-          value: rand(3, 6) * 1000000,
-          threshold: 1000000,
-          msg: `Token spike: ${rand(3, 6)}.${rand(1, 9)}x ${user.name}'s 7-day average`,
+          metric: "spend",
+          value: rand(5000, 20000),
+          threshold: rand(2000, 5000),
+          msg: `${user.name}: daily spend spiked to $${rand(50, 200)} (${rand(3, 6)}.${rand(1, 9)}x their 7-day avg) — model: ${user.primaryModel}`,
         },
         {
           type: "trend",
           severity: "warning",
-          metric: "model_shift",
-          value: rand(30, 70),
-          threshold: 20,
-          msg: `${user.name}: ${user.primaryModel} usage jumped from ${rand(3, 10)}% to ${rand(35, 70)}%`,
+          metric: "spend",
+          value: rand(30000, 100000),
+          threshold: rand(10000, 30000),
+          msg: `${user.name}: cycle spend $${rand(300, 1000)} is ${rand(3, 6)}.${rand(1, 9)}x the team median — model: ${user.primaryModel}`,
         },
       ];
       const anomaly = pick(types);
