@@ -86,13 +86,13 @@ Anomaly Detected ──→ Alert Sent ──→ Acknowledged ──→ Resolved
 
 ### Web Dashboard
 
-| Page               | What you see                                                                                                                             |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Team Overview**  | Stat cards, spend by user, daily spend trend, spend breakdown, members table with search/sort, billing cycle progress, time range picker |
-| **Insights**       | DAU chart, model adoption trends, model efficiency rankings (cost/precision), MCP tool usage, file extensions, client versions           |
-| **User Drilldown** | Per-user token timeline, model breakdown, feature usage, activity profile, anomaly history                                               |
-| **Anomalies**      | Open incidents, MTTD/MTTI/MTTR metrics, full anomaly timeline                                                                            |
-| **Settings**       | Configurable detection thresholds — no code changes needed                                                                               |
+| Page               | What you see                                                                                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Team Overview**  | Stat cards, spend by user, daily spend trend, spend breakdown, members table with search/sort, **group filter dropdown**, billing cycle progress, time range picker |
+| **Insights**       | DAU chart, model adoption trends, model efficiency rankings (cost/precision), MCP tool usage, file extensions, client versions                                      |
+| **User Drilldown** | Per-user token timeline, model breakdown, feature usage, activity profile, anomaly history                                                                          |
+| **Anomalies**      | Open incidents, MTTD/MTTI/MTTR metrics, full anomaly timeline                                                                                                       |
+| **Settings**       | Detection thresholds, **billing group management** (rename, assign, create), **HiBob CSV import** with change preview                                               |
 
 ---
 
@@ -258,6 +258,39 @@ All detection thresholds are configurable via the Settings page or the API:
 
 ---
 
+## Group Management & Filtering
+
+Billing groups let you organize team members by department, team, or any structure that fits your org.
+
+### Dashboard Filtering
+
+The Team Overview page includes a group filter dropdown next to the search bar. Select a group to instantly filter all stats, charts, and the members table to that subset. Groups are displayed in a hierarchical `Parent > Team` format.
+
+### Settings Page
+
+From the Settings page you can:
+
+- **View** all groups with member counts and per-group spend
+- **Rename** groups to match your org structure
+- **Reassign** members between groups
+- **Create** new groups manually
+- **Search** across all members to find who's in which group
+
+### HiBob Import
+
+For teams using [HiBob](https://www.hibob.com/) as their HR platform, the Settings page includes an **Import from HiBob** feature:
+
+1. Download a CSV export from HiBob's People Directory
+2. Upload it to the import modal in Settings
+3. Review the preview: see which members will be moved, which groups will be created, and which members weren't matched
+4. Selectively approve or reject individual changes before applying
+
+The import uses HiBob's `Group` and `Team` columns (falling back to `Department`) to build a `Group > Team` hierarchy. Small teams (fewer than 3 members) are automatically consolidated into broader groups to avoid excessive granularity.
+
+> **Note:** The HiBob import updates your local billing groups. It does not push changes back to HiBob or to Cursor's billing API — it only organizes members within the tracker's dashboard.
+
+---
+
 ## API Endpoints
 
 | Endpoint              | Method  | Description                                         |
@@ -267,7 +300,9 @@ All detection thresholds are configurable via the Settings page or the API:
 | `/api/analytics`      | GET     | Analytics data: DAU, models, MCP, etc. (`?days=30`) |
 | `/api/team-spend`     | GET     | Daily team spend breakdown                          |
 | `/api/model-costs`    | GET     | Model cost breakdown by users and spend             |
-| `/api/groups`         | GET     | Billing groups with member counts                   |
+| `/api/groups`         | GET     | Billing groups with members and spend               |
+| `/api/groups`         | PATCH   | Rename group, assign member, or create group        |
+| `/api/groups/import`  | POST    | HiBob CSV import (preview + apply)                  |
 | `/api/anomalies`      | GET     | Anomaly timeline (`?days=30`)                       |
 | `/api/users/[email]`  | GET     | Per-user statistics (`?days=30`)                    |
 | `/api/incidents/[id]` | PATCH   | Acknowledge or resolve incident                     |

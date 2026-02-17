@@ -51,14 +51,15 @@ Single cron endpoint `POST /api/cron` does both: collect → detect → alert in
 | `src/lib/date-utils.ts` | Date formatting helpers (formatDateShort, formatDateTick, formatDateLabel) |
 | `src/lib/format-utils.ts` | Model name shortening (MODEL_MAP regex → short labels) |
 | `src/app/api/cron/route.ts` | Main cron endpoint (collect + detect + alert) |
+| `src/app/api/groups/import/route.ts` | HiBob CSV import: parse, preview changes, apply selectively |
 
 ## Dashboard Pages
 
-- `/` — Team overview: stat cards, spend bar chart, daily spend trend, spend breakdown by user, members table with search/sort, time range picker (24h/3d/7d/14d/30d), billing cycle progress
+- `/` — Team overview: stat cards, spend bar chart, daily spend trend, spend breakdown by user, members table with search/sort, **group filter dropdown**, time range picker (24h/3d/7d/14d/30d), billing cycle progress
 - `/insights` — Analytics: DAU chart, model adoption, model efficiency rankings, MCP tool usage, file extensions, client versions
 - `/users/[email]` — Per-user: token timeline, model pie chart, feature breakdown, activity profile, anomaly history
 - `/anomalies` — MTTD/MTTI/MTTR metrics, open incidents (acknowledge/resolve), anomaly table
-- `/settings` — Configurable detection thresholds
+- `/settings` — Detection thresholds, **billing group management** (rename, assign, create), **HiBob CSV import** with change preview
 
 ## API Endpoints
 
@@ -69,7 +70,9 @@ Single cron endpoint `POST /api/cron` does both: collect → detect → alert in
 | `/api/analytics` | GET | Analytics data: DAU, models, agent edits, tabs, MCP, etc. |
 | `/api/team-spend` | GET | Daily team spend breakdown |
 | `/api/model-costs` | GET | Model cost breakdown (users, avg/total spend, requests) |
-| `/api/groups` | GET | Billing groups with member counts and spend |
+| `/api/groups` | GET | Billing groups with members and spend |
+| `/api/groups` | PATCH | Rename group, assign member, or create group |
+| `/api/groups/import` | POST | HiBob CSV import (preview + apply) |
 | `/api/anomalies` | GET | Anomaly timeline (supports `?days=N`) |
 | `/api/users/[email]` | GET | Per-user statistics (supports `?days=N`) |
 | `/api/incidents/[id]` | PATCH | Acknowledge or resolve incident |
@@ -77,7 +80,7 @@ Single cron endpoint `POST /api/cron` does both: collect → detect → alert in
 
 ## Database Tables
 
-members, daily_usage, spending, usage_events, anomalies, incidents, config, collection_log, metadata, daily_spend, billing_groups, billing_group_members, analytics_dau, analytics_model_usage, analytics_agent_edits, analytics_tabs, analytics_mcp, analytics_file_extensions, analytics_client_versions
+members, daily_usage, spending, usage_events, anomalies, incidents, config, collection_log, metadata, daily_spend, billing_groups, group_members, billing_group_members, analytics_dau, analytics_model_usage, analytics_agent_edits, analytics_tabs, analytics_mcp, analytics_file_extensions, analytics_client_versions
 
 ## Important Caveats
 

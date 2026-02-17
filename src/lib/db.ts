@@ -575,6 +575,36 @@ export function getGroupMembers(groupId: string): string[] {
   ).map((r) => r.email);
 }
 
+export function getGroupsWithMembers(): Array<{
+  id: string;
+  name: string;
+  member_count: number;
+  spend_cents: number;
+  emails: string[];
+}> {
+  const db = getDb();
+  const groups = db
+    .prepare("SELECT id, name, member_count, spend_cents FROM billing_groups ORDER BY name")
+    .all() as Array<{ id: string; name: string; member_count: number; spend_cents: number }>;
+
+  const memberRows = db.prepare("SELECT group_id, email FROM group_members").all() as Array<{
+    group_id: string;
+    email: string;
+  }>;
+
+  const membersByGroup = new Map<string, string[]>();
+  for (const row of memberRows) {
+    const list = membersByGroup.get(row.group_id) ?? [];
+    list.push(row.email);
+    membersByGroup.set(row.group_id, list);
+  }
+
+  return groups.map((g) => ({
+    ...g,
+    emails: membersByGroup.get(g.id) ?? [],
+  }));
+}
+
 export function insertAnomaly(anomaly: Anomaly): number {
   const db = getDb();
   const result = db

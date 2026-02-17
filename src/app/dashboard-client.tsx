@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import type { FullDashboard } from "@/lib/db";
 import { SpendBarChart } from "@/components/charts/spend-bar-chart";
 import { DailySpendChart } from "@/components/charts/daily-spend-chart";
@@ -8,6 +8,14 @@ import { SpendTrendChart } from "@/components/charts/spend-trend-chart";
 import { MembersTable } from "@/components/dashboard/members-table";
 import Link from "next/link";
 import { shortModel } from "@/lib/format-utils";
+
+interface BillingGroupWithMembers {
+  id: string;
+  name: string;
+  member_count: number;
+  spend_cents: number;
+  emails: string[];
+}
 
 interface ModelCost {
   model: string;
@@ -56,6 +64,45 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   const [loading, setLoading] = useState(false);
   const [sortCol, setSortCol] = useState<SortColumn>("spend");
   const [sortAsc, setSortAsc] = useState(false);
+  const [groups, setGroups] = useState<BillingGroupWithMembers[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState("all");
+
+  useEffect(() => {
+    fetch("/api/groups")
+      .then((r) => r.json())
+      .then((data: BillingGroupWithMembers[]) => setGroups(data))
+      .catch(() => {});
+  }, []);
+
+  const groupEmailSet = useMemo(() => {
+    if (selectedGroup === "all") return null;
+    if (selectedGroup.startsWith("parent:")) {
+      const prefix = selectedGroup.replace("parent:", "") + " > ";
+      const emails = new Set<string>();
+      for (const g of groups) {
+        if (g.name.startsWith(prefix) || g.name === selectedGroup.replace("parent:", "")) {
+          for (const e of g.emails) emails.add(e);
+        }
+      }
+      return emails;
+    }
+    const group = groups.find((g) => g.id === selectedGroup);
+    return group ? new Set(group.emails) : null;
+  }, [selectedGroup, groups]);
+
+  const parentGroups = useMemo(() => {
+    const parents = new Map<string, { count: number; children: BillingGroupWithMembers[] }>();
+    for (const g of groups) {
+      if (g.name === "Unassigned") continue;
+      const parts = g.name.split(" > ");
+      const parent = parts.length > 1 ? (parts[0] ?? g.name) : g.name;
+      const existing = parents.get(parent) ?? { count: 0, children: [] };
+      existing.count += g.member_count;
+      existing.children.push(g);
+      parents.set(parent, existing);
+    }
+    return parents;
+  }, [groups]);
 
   const stats = data.stats;
 
@@ -72,6 +119,9 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
 
   const filteredUsers = useMemo(() => {
     let users = stats.rankedUsers;
+    if (groupEmailSet) {
+      users = users.filter((u) => groupEmailSet.has(u.email));
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       users = users.filter(
@@ -101,7 +151,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
       }
     });
     return sorted;
-  }, [stats.rankedUsers, search, sortCol, sortAsc]);
+  }, [stats.rankedUsers, search, sortCol, sortAsc, groupEmailSet]);
 
   const searchedUser = useMemo(() => {
     if (!search.trim()) return null;
@@ -126,7 +176,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   }
 
   const timeLabel = formatTimeLabel(days);
-  const isSearching = search.trim().length > 0;
+  const isSearching = search.trim().length > 0 || selectedGroup !== "all";
   const totalLines = stats.dailyTeamActivity.reduce((s, d) => s + d.total_lines_added, 0);
   const effectiveDays = Math.min(days, stats.cycleDays);
   const cycleStartDate = new Date(stats.cycleStart);
@@ -183,7 +233,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
 
   return (
     <div className="space-y-3">
-      {/* ── Toolbar: Search + Time Range ── */}
+      {/* ── Toolbar: Search + Group Filter + Time Range ── */}
       <div className="flex items-center gap-2 flex-wrap">
         <input
           type="text"
@@ -192,6 +242,40 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
           onChange={(e) => setSearch(e.target.value)}
           className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50 w-56"
         />
+        {groups.length > 1 && (
+          <select
+            value={selectedGroup}
+            onChange={(e) => setSelectedGroup(e.target.value)}
+            className="bg-zinc-800 border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500/50 max-w-[220px] truncate"
+          >
+            <option value="all">All Groups</option>
+            {[...parentGroups.entries()].map(([parent, info]) => {
+              const hasChildren = info.children.length > 1;
+              return hasChildren ? (
+                <optgroup key={parent} label={`${parent} (${info.count})`}>
+                  <option value={`parent:${parent}`}>
+                    All {parent} ({info.count})
+                  </option>
+                  {info.children.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name.split(" > ")[1] ?? g.name} ({g.member_count})
+                    </option>
+                  ))}
+                </optgroup>
+              ) : (
+                <option key={info.children[0]?.id} value={info.children[0]?.id}>
+                  {info.children[0]?.name} ({info.children[0]?.member_count})
+                </option>
+              );
+            })}
+            {(() => {
+              const unassigned = groups.find((g) => g.name === "Unassigned");
+              return unassigned ? (
+                <option value={unassigned.id}>Unassigned ({unassigned.member_count})</option>
+              ) : null;
+            })()}
+          </select>
+        )}
         <div className="flex bg-zinc-800 rounded-md p-0.5">
           {TIME_RANGES.map((r) => (
             <button
@@ -209,6 +293,15 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
         <div className="ml-auto text-[11px] text-zinc-600">
           {isSearching ? `${filteredUsers.length} / ` : ""}
           {stats.totalMembers} members
+          {selectedGroup !== "all" && (
+            <button
+              onClick={() => setSelectedGroup("all")}
+              className="ml-1 text-blue-400 hover:text-blue-300"
+              title="Clear group filter"
+            >
+              ✕
+            </button>
+          )}
         </div>
       </div>
 
