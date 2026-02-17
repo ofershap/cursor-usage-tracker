@@ -422,7 +422,7 @@ function buildDailySpendData(breakdown: SpendBreakdownRow[]): {
     const point = byDate.get(row.date) as Record<string, number>;
     const firstName = row.name.split(" ")[0] ?? row.name;
     const dollars = row.spend_cents / 100;
-    point.total += dollars;
+    point.total = (point.total ?? 0) + dollars;
     if (topNames.includes(firstName)) {
       point[firstName] = (point[firstName] as number) + dollars;
     } else {

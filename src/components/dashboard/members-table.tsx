@@ -21,7 +21,7 @@ function rankBadge(rank: number) {
   return `#${rank}`;
 }
 
-function SortIcon({ active, asc }: { active: boolean; asc: boolean }) {
+function SortIcon({ active, asc }: { col?: string; active: boolean; asc: boolean }) {
   if (!active) return <span className="text-zinc-700 ml-0.5">↕</span>;
   return <span className="text-blue-400 ml-0.5">{asc ? "↑" : "↓"}</span>;
 }

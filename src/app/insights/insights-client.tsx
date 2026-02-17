@@ -150,7 +150,7 @@ export function InsightsClient({ data }: { data: InsightsData }) {
       if (!byDate.has(entry.date)) byDate.set(entry.date, { _total: 0 });
       const row = byDate.get(entry.date) as Record<string, number>;
       row[model] = (row[model] ?? 0) + entry.messages;
-      row._total += entry.messages;
+      row._total = (row._total ?? 0) + entry.messages;
     }
     const result: Array<Record<string, string | number>> = [];
     for (const [date, row] of [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -658,7 +658,7 @@ function ModelEfficiencySection({ data }: { data: ModelEfficiencyEntry[] }) {
                     <LabelList
                       dataKey="precision_pct"
                       position="right"
-                      formatter={(v: number) => `${v}%`}
+                      formatter={(v) => `${v ?? ""}%`}
                       style={{ fontSize: 10, fill: "#a1a1aa", fontFamily: "monospace" }}
                     />
                   </Bar>
