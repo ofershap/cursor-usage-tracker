@@ -80,12 +80,13 @@ Anomaly Detected ──→ Alert Sent ──→ Acknowledged ──→ Resolved
 
 ### Web Dashboard
 
-| Page               | What you see                                                             |
-| ------------------ | ------------------------------------------------------------------------ |
-| **Team Overview**  | Total spend, requests, tokens, top consumers, daily trends               |
-| **User Drilldown** | Per-user token timeline, model breakdown, feature usage, anomaly history |
-| **Anomalies**      | Open incidents, MTTD/MTTI/MTTR metrics, full anomaly timeline            |
-| **Settings**       | Configurable detection thresholds — no code changes needed               |
+| Page               | What you see                                                                                                                             |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Team Overview**  | Stat cards, spend by user, daily spend trend, spend breakdown, members table with search/sort, billing cycle progress, time range picker |
+| **Insights**       | DAU chart, model adoption trends, model efficiency rankings (cost/precision), MCP tool usage, file extensions, client versions           |
+| **User Drilldown** | Per-user token timeline, model breakdown, feature usage, activity profile, anomaly history                                               |
+| **Anomalies**      | Open incidents, MTTD/MTTI/MTTR metrics, full anomaly timeline                                                                            |
+| **Settings**       | Configurable detection thresholds — no code changes needed                                                                               |
 
 ---
 
@@ -123,16 +124,27 @@ CURSOR_ADMIN_API_KEY=your_admin_api_key
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../xxx
 
 # Optional
-CURSOR_ANALYTICS_API_KEY=your_analytics_key   # for DAU and model breakdowns
+CURSOR_ANALYTICS_API_KEY=your_analytics_key   # for Insights page (DAU, model breakdowns, MCP)
 CRON_SECRET=your_secret_here                  # protects the cron endpoint
-SMTP_HOST=smtp.gmail.com                      # for email alerts
+DASHBOARD_PASSWORD=your_password              # optional basic auth for the dashboard
+
+# Email alerts (optional)
+SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=you@gmail.com
 SMTP_PASS=app_password
+SMTP_FROM=cursor-tracker@yourcompany.com
 ALERT_EMAIL_TO=team-lead@company.com
 ```
 
-### 3. Collect your first data
+### 3. Start the dashboard
+
+```bash
+npm run dev
+# Open http://localhost:3000
+```
+
+### 4. Collect your first data
 
 ```bash
 npm run collect
@@ -148,14 +160,19 @@ You should see:
   Usage events: 12,847
 ```
 
-### 4. Start the dashboard
+### 5. Run anomaly detection
+
+After collecting data, run detection separately:
 
 ```bash
-npm run dev
-# Open http://localhost:3000
+npm run detect
 ```
 
-### 5. Set up recurring collection
+This analyzes the stored data against all three detection layers and sends alerts for any anomalies found.
+
+> **Note:** `npm run collect` only fetches data. `npm run detect` only runs detection. The cron endpoint (`POST /api/cron`) does both in one call.
+
+### 6. Set up recurring collection
 
 Trigger the cron endpoint hourly (via crontab, GitHub Actions, or any scheduler):
 
@@ -206,7 +223,9 @@ Cursor Enterprise APIs
   ├── /teams/members
   ├── /teams/spend
   ├── /teams/daily-usage-data
-  └── /teams/filtered-usage-events
+  ├── /teams/filtered-usage-events
+  ├── /teams/groups
+  └── /analytics/team/*
           │
           ▼
     ┌─────────────┐     ┌──────────┐     ┌───────────────────┐
@@ -232,11 +251,11 @@ All detection thresholds are configurable via the Settings page or the API:
 
 | Setting              | Default | What it does                                      |
 | -------------------- | ------- | ------------------------------------------------- |
-| Max spend per cycle  | $50.00  | Alert when a user exceeds this in a billing cycle |
-| Max requests per day | 500     | Alert on excessive daily request count            |
+| Max spend per cycle  | $200    | Alert when a user exceeds this in a billing cycle |
+| Max requests per day | 200     | Alert on excessive daily request count            |
 | Max tokens per day   | 5M      | Alert on excessive daily token consumption        |
-| Z-score multiplier   | 2.0     | How many standard deviations above mean to flag   |
-| Z-score window       | 14 days | Historical window for statistical comparison      |
+| Z-score multiplier   | 2.5     | How many standard deviations above mean to flag   |
+| Z-score window       | 7 days  | Historical window for statistical comparison      |
 | Spike multiplier     | 3.0x    | Alert when today > N× user's personal average     |
 | Drift days above P75 | 3       | Consecutive days above team P75 to flag           |
 
@@ -244,14 +263,18 @@ All detection thresholds are configurable via the Settings page or the API:
 
 ## API Endpoints
 
-| Endpoint              | Method  | Description                                   |
-| --------------------- | ------- | --------------------------------------------- |
-| `/api/cron`           | POST    | Collect + detect + alert (use with scheduler) |
-| `/api/stats`          | GET     | Dashboard statistics                          |
-| `/api/anomalies`      | GET     | Anomaly timeline                              |
-| `/api/users/[email]`  | GET     | Per-user statistics                           |
-| `/api/incidents/[id]` | PATCH   | Acknowledge or resolve incident               |
-| `/api/settings`       | GET/PUT | Detection configuration                       |
+| Endpoint              | Method  | Description                                         |
+| --------------------- | ------- | --------------------------------------------------- |
+| `/api/cron`           | POST    | Collect + detect + alert (use with scheduler)       |
+| `/api/stats`          | GET     | Dashboard statistics (`?days=7`)                    |
+| `/api/analytics`      | GET     | Analytics data: DAU, models, MCP, etc. (`?days=30`) |
+| `/api/team-spend`     | GET     | Daily team spend breakdown                          |
+| `/api/model-costs`    | GET     | Model cost breakdown by users and spend             |
+| `/api/groups`         | GET     | Billing groups with member counts                   |
+| `/api/anomalies`      | GET     | Anomaly timeline (`?days=30`)                       |
+| `/api/users/[email]`  | GET     | Per-user statistics (`?days=30`)                    |
+| `/api/incidents/[id]` | PATCH   | Acknowledge or resolve incident                     |
+| `/api/settings`       | GET/PUT | Detection configuration                             |
 
 ---
 
@@ -286,15 +309,16 @@ npm run lint         # Lint + format check
 
 Requires a **Cursor Enterprise** plan. The tool uses these endpoints:
 
-| Endpoint                            | Auth              | What it provides                            |
-| ----------------------------------- | ----------------- | ------------------------------------------- |
-| `GET /teams/members`                | Admin API key     | Team member list                            |
-| `POST /teams/spend`                 | Admin API key     | Per-user spending data                      |
-| `POST /teams/daily-usage-data`      | Admin API key     | Daily usage metrics                         |
-| `POST /teams/filtered-usage-events` | Admin API key     | Detailed usage events with model/token info |
-| `GET /analytics/team/*`             | Analytics API key | DAU, model usage breakdowns (optional)      |
+| Endpoint                            | Auth              | What it provides                             |
+| ----------------------------------- | ----------------- | -------------------------------------------- |
+| `GET /teams/members`                | Admin API key     | Team member list                             |
+| `POST /teams/spend`                 | Admin API key     | Per-user spending data                       |
+| `POST /teams/daily-usage-data`      | Admin API key     | Daily usage metrics                          |
+| `POST /teams/filtered-usage-events` | Admin API key     | Detailed usage events with model/token info  |
+| `POST /teams/groups`                | Admin API key     | Billing groups + cycle dates                 |
+| `GET /analytics/team/*`             | Analytics API key | DAU, model usage, MCP, tabs, etc. (optional) |
 
-Rate limit: 250 requests/minute. The collector handles rate limiting with automatic retry.
+Rate limit: 20 requests/minute (Admin API), 100 requests/minute (Analytics API). The collector handles rate limiting with automatic retry.
 
 ---
 

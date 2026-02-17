@@ -6,24 +6,13 @@ describe("CursorClient", () => {
 
   beforeEach(() => {
     client = new CursorClient({
-      adminApiKey: "test_key",
-      analyticsApiKey: "test_analytics_key",
+      apiKey: "test_key",
       baseUrl: "https://api.cursor.test",
     });
   });
 
   it("should construct with required options", () => {
     expect(client).toBeDefined();
-  });
-
-  it("should throw on missing analytics key", async () => {
-    const clientNoAnalytics = new CursorClient({
-      adminApiKey: "test_key",
-    });
-
-    await expect(clientNoAnalytics.getAnalyticsDAU({})).rejects.toThrow(
-      "Missing analytics API key",
-    );
   });
 
   it("should handle rate limiting with retry", async () => {

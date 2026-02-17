@@ -1,32 +1,35 @@
 import type {
   TeamMember,
-  RawDailyUsageEntry,
   DailyUsage,
+  DailyUsageResponse,
   MemberSpend,
   SpendResponse,
   RawUsageEvent,
   UsageEvent,
+  GroupsResponse,
   AnalyticsDAUResponse,
   AnalyticsModelUsageResponse,
   AnalyticsAgentEditsResponse,
   AnalyticsLeaderboardResponse,
   AnalyticsByUserResponse,
+  AnalyticsTabsResponse,
+  AnalyticsMCPResponse,
+  AnalyticsCommandsResponse,
+  AnalyticsFileExtensionsResponse,
+  AnalyticsClientVersionsResponse,
 } from "./types";
 
 interface CursorClientOptions {
-  adminApiKey: string;
-  analyticsApiKey?: string;
+  apiKey: string;
   baseUrl?: string;
 }
 
 export class CursorClient {
-  private adminApiKey: string;
-  private analyticsApiKey: string | undefined;
+  private apiKey: string;
   private baseUrl: string;
 
   constructor(options: CursorClientOptions) {
-    this.adminApiKey = options.adminApiKey;
-    this.analyticsApiKey = options.analyticsApiKey;
+    this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl ?? "https://api.cursor.com";
   }
 
@@ -35,18 +38,12 @@ export class CursorClient {
     options: {
       method?: string;
       body?: unknown;
-      useAnalyticsKey?: boolean;
     } = {},
   ): Promise<T> {
-    const { method = "GET", body, useAnalyticsKey = false } = options;
-    const apiKey = useAnalyticsKey ? this.analyticsApiKey : this.adminApiKey;
-
-    if (!apiKey) {
-      throw new Error(`Missing ${useAnalyticsKey ? "analytics" : "admin"} API key`);
-    }
+    const { method = "GET", body } = options;
 
     const url = `${this.baseUrl}${endpoint}`;
-    const credentials = Buffer.from(`${apiKey}:`).toString("base64");
+    const credentials = Buffer.from(`${this.apiKey}:`).toString("base64");
     const headers: Record<string, string> = {
       Authorization: `Basic ${credentials}`,
       "Content-Type": "application/json",
@@ -78,96 +75,51 @@ export class CursorClient {
     return data.teamMembers;
   }
 
-  async getDailyUsage(startDate: Date, endDate: Date): Promise<DailyUsage[]> {
-    const data = await this.request<{ data: RawDailyUsageEntry[] }>("/teams/daily-usage-data", {
-      method: "POST",
-      body: {
-        startDate: startDate.getTime(),
-        endDate: endDate.getTime(),
-      },
-    });
+  async getDailyUsage(options: { pageSize?: number } = {}): Promise<DailyUsage[]> {
+    const allEntries: DailyUsage[] = [];
+    let page = 1;
+    const pageSize = options.pageSize ?? 100;
 
-    const byDate = new Map<
-      string,
-      {
-        linesAdded: number;
-        linesDeleted: number;
-        accepts: number;
-        rejects: number;
-        tabs: number;
-        composer: number;
-        chat: number;
-        models: Map<string, number>;
-        extensions: Map<string, number>;
-      }
-    >();
+    while (true) {
+      const data = await this.request<DailyUsageResponse>("/teams/daily-usage-data", {
+        method: "POST",
+        body: { page, pageSize },
+      });
 
-    for (const entry of data.data) {
-      const dateStr = new Date(entry.date).toISOString().split("T")[0] ?? "";
-      const existing = byDate.get(dateStr) ?? {
-        linesAdded: 0,
-        linesDeleted: 0,
-        accepts: 0,
-        rejects: 0,
-        tabs: 0,
-        composer: 0,
-        chat: 0,
-        models: new Map<string, number>(),
-        extensions: new Map<string, number>(),
-      };
-
-      existing.linesAdded += entry.totalLinesAdded;
-      existing.linesDeleted += entry.totalLinesDeleted;
-      existing.accepts += entry.totalAccepts;
-      existing.rejects += entry.totalRejects;
-      existing.tabs += entry.totalTabsAccepted;
-      existing.composer += entry.composerRequests;
-      existing.chat += entry.chatRequests;
-
-      if (entry.mostUsedModel) {
-        existing.models.set(
-          entry.mostUsedModel,
-          (existing.models.get(entry.mostUsedModel) ?? 0) + 1,
-        );
-      }
-      if (entry.tabMostUsedExtension) {
-        existing.extensions.set(
-          entry.tabMostUsedExtension,
-          (existing.extensions.get(entry.tabMostUsedExtension) ?? 0) + 1,
-        );
+      for (const entry of data.data) {
+        allEntries.push({
+          date: entry.day,
+          userId: entry.userId,
+          email: entry.email,
+          isActive: entry.isActive,
+          linesAdded: entry.totalLinesAdded,
+          linesDeleted: entry.totalLinesDeleted,
+          acceptedLinesAdded: entry.acceptedLinesAdded,
+          acceptedLinesDeleted: entry.acceptedLinesDeleted,
+          totalApplies: entry.totalApplies,
+          totalAccepts: entry.totalAccepts,
+          totalRejects: entry.totalRejects,
+          totalTabsShown: entry.totalTabsShown,
+          tabsAccepted: entry.totalTabsAccepted,
+          composerRequests: entry.composerRequests,
+          chatRequests: entry.chatRequests,
+          agentRequests: entry.agentRequests,
+          usageBasedReqs: entry.usageBasedReqs,
+          mostUsedModel: entry.mostUsedModel,
+          tabMostUsedExtension: entry.tabMostUsedExtension,
+          clientVersion: entry.clientVersion ?? "",
+        });
       }
 
-      byDate.set(dateStr, existing);
+      console.log(
+        `[daily-usage] Page ${page}/${data.pagination.totalPages} (${allEntries.length} entries)`,
+      );
+
+      if (!data.pagination.hasNextPage) break;
+      page++;
     }
 
-    const topEntry = (map: Map<string, number>): string => {
-      let best = "";
-      let max = 0;
-      for (const [key, count] of map) {
-        if (count > max) {
-          max = count;
-          best = key;
-        }
-      }
-      return best;
-    };
-
-    return Array.from(byDate.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, d]) => {
-        const total = d.accepts + d.rejects;
-        return {
-          date,
-          linesAdded: d.linesAdded,
-          linesDeleted: d.linesDeleted,
-          acceptanceRate: total > 0 ? d.accepts / total : 0,
-          tabsUsed: d.tabs,
-          composerRequests: d.composer,
-          chatRequests: d.chat,
-          mostUsedModel: topEntry(d.models),
-          mostUsedExtension: topEntry(d.extensions),
-        };
-      });
+    return allEntries;
   }
 
   async getSpending(): Promise<{
@@ -231,13 +183,18 @@ export class CursorClient {
         allEvents.push({
           timestamp: ts,
           model: raw.model,
-          kind: raw.kindLabel,
+          kind: raw.kind,
+          maxMode: raw.maxMode,
+          requestsCostCents: raw.requestsCosts,
+          totalCents: raw.tokenUsage?.totalCents ?? 0,
           totalTokens: input + output + cacheRead + cacheWrite,
           inputTokens: input,
           outputTokens: output,
           cacheReadTokens: cacheRead,
           cacheWriteTokens: cacheWrite,
           userEmail: raw.userEmail,
+          isChargeable: raw.isChargeable,
+          isHeadless: raw.isHeadless,
         });
       }
 
@@ -248,53 +205,31 @@ export class CursorClient {
     return allEvents;
   }
 
+  async getBillingGroups(): Promise<GroupsResponse> {
+    return this.request<GroupsResponse>("/teams/groups");
+  }
+
   async getAnalyticsDAU(
-    options: {
-      startDate?: string;
-      endDate?: string;
-      users?: string[];
-    } = {},
+    options: { startDate?: string; endDate?: string; users?: string[] } = {},
   ): Promise<AnalyticsDAUResponse> {
-    const params = new URLSearchParams();
-    params.set("startDate", options.startDate ?? "30d");
-    params.set("endDate", options.endDate ?? "today");
-    if (options.users?.length) params.set("users", options.users.join(","));
-    return this.request<AnalyticsDAUResponse>(`/analytics/team/dau?${params.toString()}`, {
-      useAnalyticsKey: true,
-    });
+    return this.request<AnalyticsDAUResponse>(
+      `/analytics/team/dau?${this.analyticsParams(options)}`,
+    );
   }
 
   async getAnalyticsModelUsage(
-    options: {
-      startDate?: string;
-      endDate?: string;
-      users?: string[];
-    } = {},
+    options: { startDate?: string; endDate?: string; users?: string[] } = {},
   ): Promise<AnalyticsModelUsageResponse> {
-    const params = new URLSearchParams();
-    params.set("startDate", options.startDate ?? "30d");
-    params.set("endDate", options.endDate ?? "today");
-    if (options.users?.length) params.set("users", options.users.join(","));
     return this.request<AnalyticsModelUsageResponse>(
-      `/analytics/team/models?${params.toString()}`,
-      { useAnalyticsKey: true },
+      `/analytics/team/models?${this.analyticsParams(options)}`,
     );
   }
 
   async getAnalyticsAgentEdits(
-    options: {
-      startDate?: string;
-      endDate?: string;
-      users?: string[];
-    } = {},
+    options: { startDate?: string; endDate?: string; users?: string[] } = {},
   ): Promise<AnalyticsAgentEditsResponse> {
-    const params = new URLSearchParams();
-    params.set("startDate", options.startDate ?? "30d");
-    params.set("endDate", options.endDate ?? "today");
-    if (options.users?.length) params.set("users", options.users.join(","));
     return this.request<AnalyticsAgentEditsResponse>(
-      `/analytics/team/agent-edits?${params.toString()}`,
-      { useAnalyticsKey: true },
+      `/analytics/team/agent-edits?${this.analyticsParams(options)}`,
     );
   }
 
@@ -315,7 +250,6 @@ export class CursorClient {
     if (options.users?.length) params.set("users", options.users.join(","));
     return this.request<AnalyticsLeaderboardResponse>(
       `/analytics/team/leaderboard?${params.toString()}`,
-      { useAnalyticsKey: true },
     );
   }
 
@@ -334,9 +268,7 @@ export class CursorClient {
     if (options.page) params.set("page", String(options.page));
     if (options.pageSize) params.set("pageSize", String(options.pageSize));
     if (options.users?.length) params.set("users", options.users.join(","));
-    return this.request<AnalyticsByUserResponse>(`/analytics/by-user/models?${params.toString()}`, {
-      useAnalyticsKey: true,
-    });
+    return this.request<AnalyticsByUserResponse>(`/analytics/by-user/models?${params.toString()}`);
   }
 
   async getAnalyticsByUserAgentEdits(
@@ -356,8 +288,58 @@ export class CursorClient {
     if (options.users?.length) params.set("users", options.users.join(","));
     return this.request<AnalyticsByUserResponse>(
       `/analytics/by-user/agent-edits?${params.toString()}`,
-      { useAnalyticsKey: true },
     );
+  }
+
+  async getAnalyticsTabs(
+    options: { startDate?: string; endDate?: string; users?: string[] } = {},
+  ): Promise<AnalyticsTabsResponse> {
+    const params = this.analyticsParams(options);
+    return this.request<AnalyticsTabsResponse>(`/analytics/team/tabs?${params}`);
+  }
+
+  async getAnalyticsMCP(
+    options: { startDate?: string; endDate?: string; users?: string[] } = {},
+  ): Promise<AnalyticsMCPResponse> {
+    const params = this.analyticsParams(options);
+    return this.request<AnalyticsMCPResponse>(`/analytics/team/mcp?${params}`);
+  }
+
+  async getAnalyticsCommands(
+    options: { startDate?: string; endDate?: string; users?: string[] } = {},
+  ): Promise<AnalyticsCommandsResponse> {
+    const params = this.analyticsParams(options);
+    return this.request<AnalyticsCommandsResponse>(`/analytics/team/commands?${params}`);
+  }
+
+  async getAnalyticsFileExtensions(
+    options: { startDate?: string; endDate?: string; users?: string[] } = {},
+  ): Promise<AnalyticsFileExtensionsResponse> {
+    const params = this.analyticsParams(options);
+    return this.request<AnalyticsFileExtensionsResponse>(
+      `/analytics/team/top-file-extensions?${params}`,
+    );
+  }
+
+  async getAnalyticsClientVersions(
+    options: { startDate?: string; endDate?: string; users?: string[] } = {},
+  ): Promise<AnalyticsClientVersionsResponse> {
+    const params = this.analyticsParams(options);
+    return this.request<AnalyticsClientVersionsResponse>(
+      `/analytics/team/client-versions?${params}`,
+    );
+  }
+
+  private analyticsParams(options: {
+    startDate?: string;
+    endDate?: string;
+    users?: string[];
+  }): string {
+    const params = new URLSearchParams();
+    params.set("startDate", options.startDate ?? "30d");
+    params.set("endDate", options.endDate ?? "today");
+    if (options.users?.length) params.set("users", options.users.join(","));
+    return params.toString();
   }
 
   async setUserSpendLimit(email: string, limitDollars: number): Promise<void> {
@@ -372,14 +354,11 @@ let clientInstance: CursorClient | null = null;
 
 export function getCursorClient(): CursorClient {
   if (!clientInstance) {
-    const adminKey = process.env.CURSOR_ADMIN_API_KEY;
-    if (!adminKey) {
+    const apiKey = process.env.CURSOR_ADMIN_API_KEY;
+    if (!apiKey) {
       throw new Error("CURSOR_ADMIN_API_KEY environment variable is required");
     }
-    clientInstance = new CursorClient({
-      adminApiKey: adminKey,
-      analyticsApiKey: process.env.CURSOR_ANALYTICS_API_KEY,
-    });
+    clientInstance = new CursorClient({ apiKey });
   }
   return clientInstance;
 }

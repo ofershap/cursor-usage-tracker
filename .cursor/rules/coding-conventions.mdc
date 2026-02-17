@@ -13,12 +13,8 @@ alwaysApply: false
 - Use `import type` for type-only imports
 
 ```typescript
-// CORRECT
 import { getDb } from "@/lib/db";
 import type { Anomaly } from "@/lib/types";
-
-// WRONG — will break Next.js build
-import { getDb } from "./db.js";
 ```
 
 ## Database
@@ -27,12 +23,14 @@ import { getDb } from "./db.js";
 - Use `getDb()` singleton — it initializes schema on first call
 - Use transactions for batch inserts: `db.transaction(() => { ... })()`
 - SQLite column names use snake_case; TypeScript types use camelCase
+- Key-value metadata stored in `metadata` table via `setMetadata()`/`getMetadata()`
 
 ## API Routes
 
 - All API routes use `export const dynamic = "force-dynamic"` (data is always fresh from SQLite)
 - Cron endpoint requires `x-cron-secret` header or `?secret=` query param
 - Use Next.js App Router async params pattern: `{ params }: { params: Promise<{ id: string }> }`
+- Most GET endpoints support `?days=N` query param for time range filtering
 
 ## Components
 
@@ -40,12 +38,14 @@ import { getDb } from "./db.js";
 - Charts are always client components ("use client")
 - Use Tailwind CSS with zinc color palette (dark theme)
 - No shadcn/ui installed — components are hand-rolled
+- Model names displayed via `shortModel()` from `src/lib/format-utils.ts` with full name in tooltip
 
 ## Anomaly Detection
 
 - Three layers: thresholds → zscore → trends (all in `src/lib/anomaly/`)
 - `detector.ts` orchestrates all three, deduplicates by `userEmail:type:metric` key
 - New anomalies get inserted; existing ones that no longer fire get auto-resolved
+- Run via `npm run detect` CLI or as part of `POST /api/cron`
 
 ## Testing
 

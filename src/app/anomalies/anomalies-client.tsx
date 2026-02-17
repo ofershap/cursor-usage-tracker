@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { StatCard } from "@/components/dashboard/stat-card";
 import type { Anomaly, Incident } from "@/lib/types";
 
@@ -95,12 +96,12 @@ export function AnomaliesClient({ timeline }: AnomaliesClientProps) {
                   <tr key={incident.id} className="border-b border-zinc-800/50">
                     <td className="px-6 py-3 font-mono text-zinc-400">#{incident.id}</td>
                     <td className="px-6 py-3">
-                      <a
-                        href={`/users/${encodeURIComponent(incident.userEmail)}`}
+                      <Link
+                        href={`/users/${encodeURIComponent(incident.userEmail ?? "")}`}
                         className="text-blue-400 hover:text-blue-300"
                       >
-                        {incident.userEmail}
-                      </a>
+                        {incident.userEmail ?? "unknown"}
+                      </Link>
                     </td>
                     <td className="px-6 py-3">
                       <span
@@ -174,12 +175,12 @@ export function AnomaliesClient({ timeline }: AnomaliesClientProps) {
                       {new Date(a.detectedAt).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-3">
-                      <a
-                        href={`/users/${encodeURIComponent(a.userEmail)}`}
+                      <Link
+                        href={`/users/${encodeURIComponent(a.userEmail ?? "")}`}
                         className="text-blue-400 hover:text-blue-300"
                       >
-                        {a.userEmail.split("@")[0]}
-                      </a>
+                        {(a.userEmail ?? "unknown").split("@")[0]}
+                      </Link>
                     </td>
                     <td className="px-6 py-3">
                       <span className="px-2 py-0.5 bg-zinc-800 rounded text-xs">{a.type}</span>

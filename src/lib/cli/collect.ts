@@ -11,7 +11,6 @@ async function main() {
   console.log(`  Members: ${result.members}`);
   console.log(`  Daily usage: ${result.dailyUsage}`);
   console.log(`  Spending: ${result.spending}`);
-  console.log(`  Usage events: ${result.usageEvents}`);
 
   if (result.errors.length > 0) {
     console.error(`[collect] Errors:`);

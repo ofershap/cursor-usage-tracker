@@ -21,12 +21,12 @@ export function ModelPieChart({ data }: ModelPieChartProps) {
   const chartData = data.slice(0, 8).map((d) => ({
     name: d.model,
     value: d.tokens,
-    count: d.count,
+    days: d.count,
   }));
 
   return (
     <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
-      <h3 className="text-sm font-medium text-zinc-400 mb-4">Model Usage (by tokens)</h3>
+      <h3 className="text-sm font-medium text-zinc-400 mb-4">Model Usage (by requests)</h3>
       <ResponsiveContainer width="100%" height={300}>
         <PieChart>
           <Pie
@@ -49,10 +49,16 @@ export function ModelPieChart({ data }: ModelPieChartProps) {
               borderRadius: "8px",
               color: "#fafafa",
             }}
-            formatter={(value) => [`${(Number(value) / 1_000_000).toFixed(2)}M tokens`, "Tokens"]}
+            labelStyle={{ color: "#a1a1aa" }}
+            itemStyle={{ color: "#fafafa" }}
+            formatter={(value, _name, props) => {
+              const days = props?.payload?.days;
+              return [`${Number(value)} requests (${days} days)`, "Usage"];
+            }}
           />
           <Legend
-            formatter={(value: string) => <span className="text-zinc-400 text-xs">{value}</span>}
+            formatter={(value: string) => value}
+            wrapperStyle={{ fontSize: "12px", color: "#a1a1aa" }}
           />
         </PieChart>
       </ResponsiveContainer>

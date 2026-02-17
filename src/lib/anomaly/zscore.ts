@@ -1,12 +1,6 @@
 import type { Anomaly, DetectionConfig } from "../types";
 import { getDb } from "../db";
 
-interface UserDailyStats {
-  user_email: string;
-  tokens: number;
-  requests: number;
-}
-
 function computeZScore(value: number, mean: number, stddev: number): number {
   if (stddev === 0) return value > mean ? Infinity : 0;
   return (value - mean) / stddev;
@@ -18,95 +12,92 @@ export function detectZScoreAnomalies(config: DetectionConfig): Anomaly[] {
   const now = new Date().toISOString();
   const { multiplier, windowDays } = config.zscore;
 
+  const latestDate = db
+    .prepare("SELECT MAX(date) as d FROM daily_usage WHERE is_active = 1")
+    .get() as { d: string | null };
+
+  if (!latestDate.d) return anomalies;
+  const targetDate = latestDate.d;
+
   const todayStats = db
     .prepare(
-      `SELECT user_email, SUM(total_tokens) as tokens, COUNT(*) as requests
-       FROM usage_events
-       WHERE timestamp >= datetime('now', '-1 day')
-       GROUP BY user_email`,
+      `SELECT email, agent_requests, usage_based_reqs, most_used_model
+       FROM daily_usage
+       WHERE date = ? AND is_active = 1`,
     )
-    .all() as UserDailyStats[];
+    .all(targetDate) as Array<{
+    email: string;
+    agent_requests: number;
+    usage_based_reqs: number;
+    most_used_model: string;
+  }>;
 
-  if (todayStats.length === 0) return anomalies;
+  if (todayStats.length < 5) return anomalies;
 
-  const historicalStats = db
+  const historyStats = db
     .prepare(
-      `SELECT user_email,
-              AVG(daily_tokens) as avg_tokens,
-              AVG(daily_requests) as avg_requests,
+      `SELECT email,
+              AVG(agent_requests) as avg_requests,
               COUNT(*) as days_count
-       FROM (
-         SELECT user_email, date(timestamp) as d, SUM(total_tokens) as daily_tokens, COUNT(*) as daily_requests
-         FROM usage_events
-         WHERE timestamp >= datetime('now', ?) AND timestamp < datetime('now', '-1 day')
-         GROUP BY user_email, date(timestamp)
-       )
-       GROUP BY user_email`,
+       FROM daily_usage
+       WHERE date < ? AND date >= date(?, ?) AND is_active = 1
+       GROUP BY email`,
     )
-    .all(`-${windowDays} days`) as Array<{
-    user_email: string;
-    avg_tokens: number;
+    .all(targetDate, targetDate, `-${windowDays} days`) as Array<{
+    email: string;
     avg_requests: number;
     days_count: number;
   }>;
 
-  const histMap = new Map(historicalStats.map((h) => [h.user_email, h]));
+  const histMap = new Map(historyStats.map((h) => [h.email, h]));
 
-  const allTokens = todayStats.map((s) => s.tokens);
-  const teamMean = allTokens.reduce((a, b) => a + b, 0) / allTokens.length;
+  const allRequests = todayStats.map((s) => s.agent_requests);
+  const teamMean = allRequests.reduce((a, b) => a + b, 0) / allRequests.length;
   const teamStddev = Math.sqrt(
-    allTokens.reduce((sum, v) => sum + (v - teamMean) ** 2, 0) / allTokens.length,
+    allRequests.reduce((sum, v) => sum + (v - teamMean) ** 2, 0) / allRequests.length,
   );
 
-  const allRequests = todayStats.map((s) => s.requests);
-  const teamReqMean = allRequests.reduce((a, b) => a + b, 0) / allRequests.length;
-  const teamReqStddev = Math.sqrt(
-    allRequests.reduce((sum, v) => sum + (v - teamReqMean) ** 2, 0) / allRequests.length,
+  const allUsageBased = todayStats.map((s) => s.usage_based_reqs);
+  const teamUsageMean = allUsageBased.reduce((a, b) => a + b, 0) / allUsageBased.length;
+  const teamUsageStddev = Math.sqrt(
+    allUsageBased.reduce((sum, v) => sum + (v - teamUsageMean) ** 2, 0) / allUsageBased.length,
   );
 
   for (const user of todayStats) {
-    const tokenZ = computeZScore(user.tokens, teamMean, teamStddev);
-    if (tokenZ > multiplier) {
-      const hist = histMap.get(user.user_email);
-      const topModel = db
-        .prepare(
-          `SELECT model, SUM(total_tokens) as tokens FROM usage_events
-           WHERE user_email = ? AND timestamp >= datetime('now', '-1 day')
-           GROUP BY model ORDER BY tokens DESC LIMIT 1`,
-        )
-        .get(user.user_email) as { model: string; tokens: number } | undefined;
-
-      anomalies.push({
-        userEmail: user.user_email,
-        type: "zscore",
-        severity: tokenZ > multiplier * 1.5 ? "critical" : "warning",
-        metric: "tokens",
-        value: user.tokens,
-        threshold: teamMean + multiplier * teamStddev,
-        message: `Token usage ${(user.tokens / 1_000_000).toFixed(1)}M is ${tokenZ.toFixed(1)} std devs above team mean (${(teamMean / 1_000_000).toFixed(1)}M)`,
-        detectedAt: now,
-        resolvedAt: null,
-        alertedAt: null,
-        diagnosisModel: topModel?.model ?? null,
-        diagnosisKind: null,
-        diagnosisDelta: hist ? user.tokens - hist.avg_tokens : null,
-      });
-    }
-
-    const reqZ = computeZScore(user.requests, teamReqMean, teamReqStddev);
+    const reqZ = computeZScore(user.agent_requests, teamMean, teamStddev);
     if (reqZ > multiplier) {
+      const hist = histMap.get(user.email);
       anomalies.push({
-        userEmail: user.user_email,
+        userEmail: user.email,
         type: "zscore",
         severity: reqZ > multiplier * 1.5 ? "critical" : "warning",
         metric: "requests",
-        value: user.requests,
-        threshold: teamReqMean + multiplier * teamReqStddev,
-        message: `${user.requests} requests today is ${reqZ.toFixed(1)} std devs above team mean (${teamReqMean.toFixed(0)})`,
+        value: user.agent_requests,
+        threshold: teamMean + multiplier * teamStddev,
+        message: `${user.agent_requests} agent requests on ${targetDate} is ${reqZ.toFixed(1)} std devs above team mean (${teamMean.toFixed(0)}) — model: ${user.most_used_model}`,
         detectedAt: now,
         resolvedAt: null,
         alertedAt: null,
-        diagnosisModel: null,
+        diagnosisModel: user.most_used_model || null,
+        diagnosisKind: null,
+        diagnosisDelta: hist ? user.agent_requests - hist.avg_requests : null,
+      });
+    }
+
+    const usageZ = computeZScore(user.usage_based_reqs, teamUsageMean, teamUsageStddev);
+    if (usageZ > multiplier && reqZ <= multiplier) {
+      anomalies.push({
+        userEmail: user.email,
+        type: "zscore",
+        severity: usageZ > multiplier * 1.5 ? "critical" : "warning",
+        metric: "usage_based",
+        value: user.usage_based_reqs,
+        threshold: teamUsageMean + multiplier * teamUsageStddev,
+        message: `${user.usage_based_reqs} usage-based requests on ${targetDate} is ${usageZ.toFixed(1)} std devs above team mean (${teamUsageMean.toFixed(0)})`,
+        detectedAt: now,
+        resolvedAt: null,
+        alertedAt: null,
+        diagnosisModel: user.most_used_model || null,
         diagnosisKind: null,
         diagnosisDelta: null,
       });

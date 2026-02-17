@@ -13,6 +13,7 @@
   --destructive: #ef4444;
   --warning: #f59e0b;
   --success: #22c55e;
+  color-scheme: dark;
 }
 
 body {
@@ -22,4 +23,24 @@ body {
     system-ui,
     -apple-system,
     sans-serif;
+}
+
+.recharts-default-tooltip {
+  background-color: #18181b !important;
+  border-color: #27272a !important;
+  color: #fafafa !important;
+}
+
+.recharts-tooltip-label {
+  color: #a1a1aa !important;
+}
+
+.recharts-tooltip-item {
+  color: #fafafa !important;
+}
+
+.recharts-tooltip-item-name,
+.recharts-tooltip-item-separator,
+.recharts-tooltip-item-value {
+  color: #fafafa !important;
 }

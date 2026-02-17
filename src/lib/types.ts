@@ -1,44 +1,95 @@
 export interface TeamMember {
   name: string;
   email: string;
+  id: string;
   role: string;
+  isRemoved: boolean;
 }
 
 export interface RawDailyUsageEntry {
   date: number;
+  day: string;
+  userId: string;
+  email: string;
+  isActive: boolean;
   totalLinesAdded: number;
   totalLinesDeleted: number;
+  acceptedLinesAdded: number;
+  acceptedLinesDeleted: number;
+  totalApplies: number;
   totalAccepts: number;
   totalRejects: number;
+  totalTabsShown: number;
   totalTabsAccepted: number;
   composerRequests: number;
   chatRequests: number;
+  agentRequests: number;
+  cmdkUsages: number;
+  subscriptionIncludedReqs: number;
+  apiKeyReqs: number;
+  usageBasedReqs: number;
+  bugbotUsages: number;
   mostUsedModel: string;
+  applyMostUsedExtension: string;
   tabMostUsedExtension: string;
+  clientVersion?: string;
+}
+
+export interface DailyUsageResponse {
+  period: { startDate: number; endDate: number };
+  data: RawDailyUsageEntry[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    totalUsers: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
 }
 
 export interface DailyUsage {
   date: string;
+  userId: string;
+  email: string;
+  isActive: boolean;
   linesAdded: number;
   linesDeleted: number;
-  acceptanceRate: number;
-  tabsUsed: number;
+  acceptedLinesAdded: number;
+  acceptedLinesDeleted: number;
+  totalApplies: number;
+  totalAccepts: number;
+  totalRejects: number;
+  totalTabsShown: number;
+  tabsAccepted: number;
   composerRequests: number;
   chatRequests: number;
+  agentRequests: number;
+  usageBasedReqs: number;
   mostUsedModel: string;
-  mostUsedExtension: string;
+  tabMostUsedExtension: string;
+  clientVersion: string;
 }
 
 export interface MemberSpend {
+  userId: string;
   email: string;
+  name: string;
+  role: string;
   spendCents: number;
+  includedSpendCents: number;
   fastPremiumRequests: number;
+  monthlyLimitDollars: number | null;
+  hardLimitOverrideDollars: number;
 }
 
 export interface SpendResponse {
   teamMemberSpend: MemberSpend[];
   subscriptionCycleStart: number;
+  totalMembers: number;
   totalPages: number;
+  limitedUsersCount: number;
+  maxUserSpendCents: number;
 }
 
 export interface TokenUsage {
@@ -46,26 +97,37 @@ export interface TokenUsage {
   outputTokens: number;
   cacheWriteTokens: number;
   cacheReadTokens: number;
+  totalCents: number;
 }
 
 export interface RawUsageEvent {
   timestamp: string;
   model: string;
-  kindLabel: string;
+  kind: string;
+  maxMode: boolean;
+  requestsCosts: number;
+  isTokenBasedCall: boolean;
   tokenUsage: TokenUsage | null;
   userEmail: string;
+  isChargeable: boolean;
+  isHeadless: boolean;
 }
 
 export interface UsageEvent {
   timestamp: Date;
   model: string;
   kind: string;
+  maxMode: boolean;
+  requestsCostCents: number;
+  totalCents: number;
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
   userEmail: string;
+  isChargeable: boolean;
+  isHeadless: boolean;
 }
 
 export interface AnalyticsDAUEntry {
@@ -165,9 +227,109 @@ export interface AnalyticsByUserResponse {
   params: Record<string, unknown>;
 }
 
+export interface AnalyticsTabsEntry {
+  event_date: string;
+  total_suggestions: number;
+  total_accepts: number;
+  total_rejects: number;
+  total_lines_suggested: number;
+  total_lines_accepted: number;
+  total_green_lines_accepted: number;
+  total_red_lines_accepted: number;
+  total_green_lines_rejected: number;
+  total_red_lines_rejected: number;
+  total_green_lines_suggested: number;
+  total_red_lines_suggested: number;
+}
+
+export interface AnalyticsTabsResponse {
+  data: AnalyticsTabsEntry[];
+  params: Record<string, unknown>;
+}
+
+export interface AnalyticsMCPEntry {
+  event_date: string;
+  tool_name: string;
+  mcp_server_name: string;
+  usage: number;
+}
+
+export interface AnalyticsMCPResponse {
+  data: AnalyticsMCPEntry[];
+  params: Record<string, unknown>;
+}
+
+export interface AnalyticsCommandsEntry {
+  event_date: string;
+  command_name: string;
+  usage: number;
+}
+
+export interface AnalyticsCommandsResponse {
+  data: AnalyticsCommandsEntry[];
+  params: Record<string, unknown>;
+}
+
+export interface AnalyticsFileExtensionsEntry {
+  event_date: string;
+  file_extension: string;
+  total_files: number;
+  total_accepts: number;
+  total_rejects: number;
+  total_lines_suggested: number;
+  total_lines_accepted: number;
+  total_lines_rejected: number;
+}
+
+export interface AnalyticsFileExtensionsResponse {
+  data: AnalyticsFileExtensionsEntry[];
+  params: Record<string, unknown>;
+}
+
+export interface AnalyticsClientVersionsEntry {
+  event_date: string;
+  client_version: string;
+  user_count: number;
+  percentage: number;
+}
+
+export interface AnalyticsClientVersionsResponse {
+  data: AnalyticsClientVersionsEntry[];
+  params: Record<string, unknown>;
+}
+
+export interface GroupMemberSpend {
+  userId: string;
+  name: string;
+  email: string;
+  joinedAt: string;
+  leftAt: string | null;
+  spendCents: number;
+  dailySpend: Array<{ date: string; spendCents: number }>;
+}
+
+export interface BillingGroup {
+  id: string;
+  name: string;
+  type: string;
+  memberCount: number;
+  spendCents: number;
+  currentMembers: GroupMemberSpend[];
+  dailySpend: Array<{ date: string; spendCents: number }>;
+}
+
+export interface GroupsResponse {
+  groups: BillingGroup[];
+  unassignedGroup: BillingGroup;
+  billingCycle?: {
+    cycleStart: string;
+    cycleEnd: string;
+  };
+}
+
 export type AnomalySeverity = "warning" | "critical";
 export type AnomalyType = "threshold" | "zscore" | "trend";
-export type AnomalyMetric = "spend" | "requests" | "tokens" | "model_shift";
+export type AnomalyMetric = "spend" | "requests" | "tokens" | "usage_based" | "model_shift";
 
 export interface Anomaly {
   id?: number;
@@ -222,13 +384,13 @@ export interface DetectionConfig {
 
 export const DEFAULT_CONFIG: DetectionConfig = {
   thresholds: {
-    maxSpendCentsPerCycle: 5000,
-    maxRequestsPerDay: 500,
+    maxSpendCentsPerCycle: 20000,
+    maxRequestsPerDay: 200,
     maxTokensPerDay: 5_000_000,
   },
   zscore: {
-    multiplier: 2,
-    windowDays: 14,
+    multiplier: 2.5,
+    windowDays: 7,
   },
   trends: {
     spikeMultiplier: 3,

@@ -1,0 +1,98 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev Server",
+      "type": "shell",
+      "command": "npm run dev -- --turbopack -p 3456",
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": {
+        "group": "cursor-tracker",
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": true,
+        "reveal": "always",
+        "focus": false
+      },
+      "icon": {
+        "id": "globe",
+        "color": "terminal.ansiCyan"
+      }
+    },
+    {
+      "label": "Collect Data",
+      "type": "shell",
+      "command": "npm run collect",
+      "problemMatcher": [],
+      "presentation": {
+        "group": "cursor-tracker",
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": true,
+        "reveal": "always"
+      },
+      "icon": {
+        "id": "cloud-download",
+        "color": "terminal.ansiGreen"
+      }
+    },
+    {
+      "label": "Run Anomaly Detection",
+      "type": "shell",
+      "command": "npm run detect",
+      "problemMatcher": [],
+      "presentation": {
+        "group": "cursor-tracker",
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": true,
+        "reveal": "always"
+      },
+      "icon": {
+        "id": "warning",
+        "color": "terminal.ansiYellow"
+      }
+    },
+    {
+      "label": "Collect + Detect",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Collect Data", "Run Anomaly Detection"],
+      "problemMatcher": [],
+      "icon": {
+        "id": "zap",
+        "color": "terminal.ansiMagenta"
+      }
+    },
+    {
+      "label": "Type Check",
+      "type": "shell",
+      "command": "npm run typecheck",
+      "problemMatcher": ["$tsc"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "group": "build",
+      "icon": {
+        "id": "check",
+        "color": "terminal.ansiBlue"
+      }
+    },
+    {
+      "label": "Run Tests",
+      "type": "shell",
+      "command": "npm test",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "group": "test",
+      "icon": {
+        "id": "beaker",
+        "color": "terminal.ansiGreen"
+      }
+    }
+  ]
+}

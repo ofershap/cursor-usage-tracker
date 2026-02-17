@@ -42,6 +42,10 @@ Poll at most once per hour (data aggregated hourly). Max 30 days per request.
 ### POST /teams/user-spend-limit
 Body: `{ email, hardLimitDollars }`
 
+### POST /teams/groups
+Returns `{ groups: [{ id, name, memberCount, spendCents, members: [{ email, joinedAt }] }], subscriptionCycleStart, subscriptionCycleEnd }`
+Also provides billing cycle dates (cycle_start, cycle_end) stored in the metadata table.
+
 ## Analytics API Endpoints (separate key: CURSOR_ANALYTICS_API_KEY)
 
 All use `startDate`/`endDate` params (formats: `YYYY-MM-DD`, `7d`, `30d`, `today`, `yesterday`). Max 30 days. Default: last 7 days.

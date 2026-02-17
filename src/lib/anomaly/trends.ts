@@ -1,6 +1,19 @@
 import type { Anomaly, DetectionConfig } from "../types";
 import { getDb } from "../db";
 
+const EXPENSIVE_MODELS = new Set([
+  "claude-4.6-opus-high-thinking",
+  "claude-4.6-opus-high",
+  "claude-4.6-opus-max-thinking",
+  "claude-4.6-opus-max",
+  "claude-4.5-opus-high-thinking",
+  "claude-4.5-opus-high",
+  "gpt-5.3-codex",
+  "gpt-5.3-codex-high",
+  "gpt-5.3-codex-xhigh",
+  "gpt-5.2-codex",
+]);
+
 export function detectTrendAnomalies(config: DetectionConfig): Anomaly[] {
   const db = getDb();
   const anomalies: Anomaly[] = [];
@@ -21,79 +34,58 @@ function detectSpikes(
   spikeMultiplier: number,
   lookbackDays: number,
 ): void {
+  const latestDate = db
+    .prepare("SELECT MAX(date) as d FROM daily_usage WHERE is_active = 1")
+    .get() as { d: string | null };
+
+  if (!latestDate.d) return;
+  const targetDate = latestDate.d;
+
   const todayByUser = db
     .prepare(
-      `SELECT user_email, SUM(total_tokens) as tokens, COUNT(*) as requests
-       FROM usage_events
-       WHERE timestamp >= datetime('now', '-1 day')
-       GROUP BY user_email`,
+      `SELECT email, agent_requests, usage_based_reqs, most_used_model
+       FROM daily_usage
+       WHERE date = ? AND is_active = 1`,
     )
-    .all() as Array<{ user_email: string; tokens: number; requests: number }>;
+    .all(targetDate) as Array<{
+    email: string;
+    agent_requests: number;
+    usage_based_reqs: number;
+    most_used_model: string;
+  }>;
 
   for (const user of todayByUser) {
+    if (user.agent_requests < 10) continue;
+
     const history = db
       .prepare(
-        `SELECT AVG(daily_tokens) as avg_tokens, AVG(daily_requests) as avg_requests
-         FROM (
-           SELECT SUM(total_tokens) as daily_tokens, COUNT(*) as daily_requests
-           FROM usage_events
-           WHERE user_email = ? AND timestamp >= datetime('now', ?) AND timestamp < datetime('now', '-1 day')
-           GROUP BY date(timestamp)
-         )`,
+        `SELECT AVG(agent_requests) as avg_requests
+         FROM daily_usage
+         WHERE email = ? AND date < ? AND date >= date(?, ?) AND is_active = 1`,
       )
-      .get(user.user_email, `-${lookbackDays} days`) as {
-      avg_tokens: number | null;
+      .get(user.email, targetDate, targetDate, `-${lookbackDays} days`) as {
       avg_requests: number | null;
     };
 
-    if (!history.avg_tokens || history.avg_tokens === 0) continue;
+    if (!history.avg_requests || history.avg_requests < 5) continue;
 
-    const tokenRatio = user.tokens / history.avg_tokens;
-    if (tokenRatio > spikeMultiplier) {
-      const topModel = db
-        .prepare(
-          `SELECT model, SUM(total_tokens) as tokens FROM usage_events
-           WHERE user_email = ? AND timestamp >= datetime('now', '-1 day')
-           GROUP BY model ORDER BY tokens DESC LIMIT 1`,
-        )
-        .get(user.user_email) as { model: string; tokens: number } | undefined;
-
+    const ratio = user.agent_requests / history.avg_requests;
+    if (ratio > spikeMultiplier) {
       anomalies.push({
-        userEmail: user.user_email,
+        userEmail: user.email,
         type: "trend",
-        severity: tokenRatio > spikeMultiplier * 2 ? "critical" : "warning",
-        metric: "tokens",
-        value: user.tokens,
-        threshold: history.avg_tokens * spikeMultiplier,
-        message: `Token spike: ${tokenRatio.toFixed(1)}x their ${lookbackDays}-day average (${(history.avg_tokens / 1_000_000).toFixed(1)}M -> ${(user.tokens / 1_000_000).toFixed(1)}M)`,
+        severity: ratio > spikeMultiplier * 2 ? "critical" : "warning",
+        metric: "requests",
+        value: user.agent_requests,
+        threshold: history.avg_requests * spikeMultiplier,
+        message: `Request spike: ${ratio.toFixed(1)}x their ${lookbackDays}-day average (${history.avg_requests.toFixed(0)} → ${user.agent_requests}) — model: ${user.most_used_model}`,
         detectedAt: now,
         resolvedAt: null,
         alertedAt: null,
-        diagnosisModel: topModel?.model ?? null,
+        diagnosisModel: user.most_used_model || null,
         diagnosisKind: null,
-        diagnosisDelta: user.tokens - history.avg_tokens,
+        diagnosisDelta: user.agent_requests - history.avg_requests,
       });
-    }
-
-    if (history.avg_requests && history.avg_requests > 0) {
-      const reqRatio = user.requests / history.avg_requests;
-      if (reqRatio > spikeMultiplier) {
-        anomalies.push({
-          userEmail: user.user_email,
-          type: "trend",
-          severity: reqRatio > spikeMultiplier * 2 ? "critical" : "warning",
-          metric: "requests",
-          value: user.requests,
-          threshold: history.avg_requests * spikeMultiplier,
-          message: `Request spike: ${reqRatio.toFixed(1)}x their ${lookbackDays}-day average (${history.avg_requests.toFixed(0)} -> ${user.requests})`,
-          detectedAt: now,
-          resolvedAt: null,
-          alertedAt: null,
-          diagnosisModel: null,
-          diagnosisKind: null,
-          diagnosisDelta: user.requests - history.avg_requests,
-        });
-      }
     }
   }
 }
@@ -106,124 +98,113 @@ function detectDrift(
 ): void {
   const recentDays = db
     .prepare(
-      `SELECT user_email, date(timestamp) as d, SUM(total_tokens) as tokens
-       FROM usage_events
-       WHERE timestamp >= datetime('now', ?)
-       GROUP BY user_email, date(timestamp)`,
+      `SELECT email, date, agent_requests
+       FROM daily_usage
+       WHERE date >= date('now', ?) AND is_active = 1`,
     )
     .all(`-${driftDays + 1} days`) as Array<{
-    user_email: string;
-    d: string;
-    tokens: number;
+    email: string;
+    date: string;
+    agent_requests: number;
   }>;
 
-  const allDailyTokens = recentDays.map((r) => r.tokens);
-  if (allDailyTokens.length === 0) return;
+  const allDailyRequests = recentDays.map((r) => r.agent_requests).filter((r) => r > 0);
+  if (allDailyRequests.length === 0) return;
 
-  const sorted = [...allDailyTokens].sort((a, b) => a - b);
+  const sorted = [...allDailyRequests].sort((a, b) => a - b);
   const p75Index = Math.floor(sorted.length * 0.75);
   const p75 = sorted[p75Index] ?? 0;
 
   const byUser = new Map<string, number[]>();
   for (const row of recentDays) {
-    const arr = byUser.get(row.user_email) ?? [];
-    arr.push(row.tokens);
-    byUser.set(row.user_email, arr);
+    const arr = byUser.get(row.email) ?? [];
+    arr.push(row.agent_requests);
+    byUser.set(row.email, arr);
   }
 
-  for (const [email, dailyTokens] of byUser) {
-    const daysAbove = dailyTokens.filter((t) => t > p75).length;
+  for (const [email, dailyReqs] of byUser) {
+    const daysAbove = dailyReqs.filter((r) => r > p75).length;
     if (daysAbove >= driftDays) {
-      const avgTokens = dailyTokens.reduce((a, b) => a + b, 0) / dailyTokens.length;
+      const avgReqs = dailyReqs.reduce((a, b) => a + b, 0) / dailyReqs.length;
       anomalies.push({
         userEmail: email,
         type: "trend",
         severity: "warning",
-        metric: "tokens",
-        value: avgTokens,
+        metric: "requests",
+        value: avgReqs,
         threshold: p75,
-        message: `Sustained drift: above team P75 for ${daysAbove} of last ${dailyTokens.length} days`,
+        message: `Sustained high usage: above team P75 (${p75} reqs) for ${daysAbove} of last ${dailyReqs.length} days (avg: ${avgReqs.toFixed(0)})`,
         detectedAt: now,
         resolvedAt: null,
         alertedAt: null,
         diagnosisModel: null,
         diagnosisKind: null,
-        diagnosisDelta: avgTokens - p75,
+        diagnosisDelta: avgReqs - p75,
       });
     }
   }
 }
 
 function detectModelShift(db: ReturnType<typeof getDb>, anomalies: Anomaly[], now: string): void {
-  const recentModels = db
-    .prepare(
-      `SELECT user_email, model, COUNT(*) as cnt
-       FROM usage_events
-       WHERE timestamp >= datetime('now', '-1 day')
-       GROUP BY user_email, model`,
-    )
-    .all() as Array<{ user_email: string; model: string; cnt: number }>;
+  const latestDate = db
+    .prepare("SELECT MAX(date) as d FROM daily_usage WHERE is_active = 1")
+    .get() as { d: string | null };
 
-  const expensiveModels = new Set([
-    "claude-opus-4.6",
-    "claude-opus-4.5",
-    "gpt-5.3-codex",
-    "gpt-5.2",
-    "o1",
-  ]);
+  if (!latestDate.d) return;
+  const targetDate = latestDate.d;
 
-  const historicalModels = db
+  const todayModels = db
     .prepare(
-      `SELECT user_email, model, COUNT(*) as cnt
-       FROM usage_events
-       WHERE timestamp >= datetime('now', '-8 days') AND timestamp < datetime('now', '-1 day')
-       GROUP BY user_email, model`,
+      `SELECT email, most_used_model
+       FROM daily_usage
+       WHERE date = ? AND is_active = 1 AND most_used_model != ''`,
     )
-    .all() as Array<{ user_email: string; model: string; cnt: number }>;
+    .all(targetDate) as Array<{ email: string; most_used_model: string }>;
+
+  const historyModels = db
+    .prepare(
+      `SELECT email, most_used_model, COUNT(*) as days
+       FROM daily_usage
+       WHERE date < ? AND date >= date(?, '-7 days') AND is_active = 1 AND most_used_model != ''
+       GROUP BY email, most_used_model`,
+    )
+    .all(targetDate, targetDate) as Array<{ email: string; most_used_model: string; days: number }>;
 
   const histByUser = new Map<string, Map<string, number>>();
-  for (const row of historicalModels) {
-    const models = histByUser.get(row.user_email) ?? new Map();
-    models.set(row.model, row.cnt);
-    histByUser.set(row.user_email, models);
+  for (const row of historyModels) {
+    const models = histByUser.get(row.email) ?? new Map();
+    models.set(row.most_used_model, row.days);
+    histByUser.set(row.email, models);
   }
 
-  const todayByUser = new Map<string, Map<string, number>>();
-  for (const row of recentModels) {
-    const models = todayByUser.get(row.user_email) ?? new Map();
-    models.set(row.model, row.cnt);
-    todayByUser.set(row.user_email, models);
-  }
+  for (const row of todayModels) {
+    if (!EXPENSIVE_MODELS.has(row.most_used_model)) continue;
 
-  for (const [email, todayModels] of todayByUser) {
-    const histModels = histByUser.get(email);
-    if (!histModels) continue;
+    const hist = histByUser.get(row.email);
+    if (!hist) continue;
 
-    const todayTotal = Array.from(todayModels.values()).reduce((a, b) => a + b, 0);
-    const histTotal = Array.from(histModels.values()).reduce((a, b) => a + b, 0);
-    if (todayTotal === 0 || histTotal === 0) continue;
+    const totalHistDays = Array.from(hist.values()).reduce((a, b) => a + b, 0);
+    if (totalHistDays < 3) continue;
 
-    for (const expModel of expensiveModels) {
-      const todayPct = (todayModels.get(expModel) ?? 0) / todayTotal;
-      const histPct = (histModels.get(expModel) ?? 0) / histTotal;
+    const expensiveDaysHist = hist.get(row.most_used_model) ?? 0;
+    const histPct = expensiveDaysHist / totalHistDays;
 
-      if (todayPct > 0.3 && todayPct - histPct > 0.2) {
-        anomalies.push({
-          userEmail: email,
-          type: "trend",
-          severity: "warning",
-          metric: "model_shift",
-          value: todayPct * 100,
-          threshold: histPct * 100,
-          message: `Model shift: ${expModel} usage jumped from ${(histPct * 100).toFixed(0)}% to ${(todayPct * 100).toFixed(0)}% of requests`,
-          detectedAt: now,
-          resolvedAt: null,
-          alertedAt: null,
-          diagnosisModel: expModel,
-          diagnosisKind: null,
-          diagnosisDelta: (todayPct - histPct) * 100,
-        });
-      }
+    if (histPct < 0.3) {
+      anomalies.push({
+        userEmail: row.email,
+        type: "trend",
+        severity: "warning",
+        metric: "model_shift",
+        value: 100,
+        threshold: histPct * 100,
+        message: `Model shift: switched to ${row.most_used_model} today (previously used ${(histPct * 100).toFixed(0)}% of days)`,
+        detectedAt: now,
+        resolvedAt: null,
+        alertedAt: null,
+        diagnosisModel: row.most_used_model,
+        diagnosisKind: null,
+        diagnosisDelta: (1 - histPct) * 100,
+      });
     }
   }
 }

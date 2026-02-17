@@ -1,12 +1,12 @@
-import { getDashboardStats } from "@/lib/db";
+import { getFullDashboard } from "@/lib/db";
 import { DashboardClient } from "./dashboard-client";
 
 export const dynamic = "force-dynamic";
 
 export default function HomePage() {
-  let stats;
   try {
-    stats = getDashboardStats(30);
+    const data = getFullDashboard(7);
+    return <DashboardClient initialData={data} />;
   } catch {
     return (
       <div className="text-center py-20">
@@ -19,6 +19,4 @@ export default function HomePage() {
       </div>
     );
   }
-
-  return <DashboardClient stats={stats} />;
 }
