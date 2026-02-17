@@ -46,7 +46,7 @@ Single cron endpoint `POST /api/cron` does both: collect → detect → alert in
 | `src/lib/anomaly/zscore.ts` | Layer 2: statistical z-score vs team mean |
 | `src/lib/anomaly/trends.ts` | Layer 3: personal spikes, drift above P75, model shift |
 | `src/lib/incidents.ts` | Incident lifecycle: create, alert, acknowledge, resolve + MTTD/MTTI/MTTR |
-| `src/lib/alerts/slack.ts` | Slack webhook with block-kit messages |
+| `src/lib/alerts/slack.ts` | Slack bot token + chat.postMessage with block-kit messages |
 | `src/lib/alerts/email.ts` | SMTP email with HTML templates |
 | `src/lib/date-utils.ts` | Date formatting helpers (formatDateShort, formatDateTick, formatDateLabel) |
 | `src/lib/format-utils.ts` | Model name shortening (MODEL_MAP regex → short labels) |

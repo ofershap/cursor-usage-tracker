@@ -1,5 +1,7 @@
 import type { Anomaly, Incident } from "../types";
 
+const SLACK_API_URL = "https://slack.com/api/chat.postMessage";
+
 interface SlackBlock {
   type: string;
   text?: { type: string; text: string; emoji?: boolean };
@@ -9,6 +11,21 @@ interface SlackBlock {
 
 function severityEmoji(severity: string): string {
   return severity === "critical" ? ":rotating_light:" : ":warning:";
+}
+
+function formatValue(metric: string, value: number): string {
+  switch (metric) {
+    case "spend":
+      return `$${(value / 100).toFixed(2)}`;
+    case "tokens":
+      return `${(value / 1_000_000).toFixed(2)}M`;
+    case "requests":
+      return `${value.toFixed(0)}`;
+    case "model_shift":
+      return `${value.toFixed(0)}%`;
+    default:
+      return `${value}`;
+  }
 }
 
 function buildAlertBlocks(
@@ -87,66 +104,32 @@ function buildAlertBlocks(
   return blocks;
 }
 
-function formatValue(metric: string, value: number): string {
-  switch (metric) {
-    case "spend":
-      return `$${(value / 100).toFixed(2)}`;
-    case "tokens":
-      return `${(value / 1_000_000).toFixed(2)}M`;
-    case "requests":
-      return `${value.toFixed(0)}`;
-    case "model_shift":
-      return `${value.toFixed(0)}%`;
-    default:
-      return `${value}`;
-  }
-}
-
 export async function sendSlackAlert(
   anomaly: Anomaly,
   incident: Incident,
-  options: { webhookUrl?: string; dashboardUrl?: string } = {},
+  options: { dashboardUrl?: string } = {},
 ): Promise<boolean> {
-  const webhookUrl = options.webhookUrl ?? process.env.SLACK_WEBHOOK_URL;
-  if (!webhookUrl) return false;
+  const token = process.env.SLACK_BOT_TOKEN;
+  const channel = process.env.SLACK_CHANNEL_ID;
+  if (!token || !channel) return false;
 
   const blocks = buildAlertBlocks(anomaly, incident, options.dashboardUrl);
 
-  const response = await fetch(webhookUrl, {
+  const response = await fetch(SLACK_API_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify({
+      channel,
       text: `${severityEmoji(anomaly.severity)} ${anomaly.message} — ${anomaly.userEmail}`,
       blocks,
     }),
   });
 
-  return response.ok;
-}
+  if (!response.ok) return false;
 
-export async function sendSlackResolution(
-  anomaly: Anomaly,
-  options: { webhookUrl?: string } = {},
-): Promise<boolean> {
-  const webhookUrl = options.webhookUrl ?? process.env.SLACK_WEBHOOK_URL;
-  if (!webhookUrl) return false;
-
-  const response = await fetch(webhookUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text: `:white_check_mark: Resolved: ${anomaly.message} — ${anomaly.userEmail}`,
-      blocks: [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `:white_check_mark: *Resolved:* ${anomaly.message}\n*User:* ${anomaly.userEmail}`,
-          },
-        },
-      ],
-    }),
-  });
-
-  return response.ok;
+  const data = (await response.json()) as { ok: boolean };
+  return data.ok;
 }

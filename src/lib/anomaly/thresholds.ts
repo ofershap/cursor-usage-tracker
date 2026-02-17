@@ -20,7 +20,10 @@ export function detectThresholdAnomalies(config: DetectionConfig): Anomaly[] {
   }>;
 
   for (const s of spenders) {
-    if (s.spend_cents > config.thresholds.maxSpendCentsPerCycle) {
+    if (
+      config.thresholds.maxSpendCentsPerCycle > 0 &&
+      s.spend_cents > config.thresholds.maxSpendCentsPerCycle
+    ) {
       anomalies.push({
         userEmail: s.email,
         type: "threshold",
@@ -55,7 +58,10 @@ export function detectThresholdAnomalies(config: DetectionConfig): Anomaly[] {
   }>;
 
   for (const r of dailyRequests) {
-    if (r.agent_requests > config.thresholds.maxRequestsPerDay) {
+    if (
+      config.thresholds.maxRequestsPerDay > 0 &&
+      r.agent_requests > config.thresholds.maxRequestsPerDay
+    ) {
       anomalies.push({
         userEmail: r.email,
         type: "threshold",

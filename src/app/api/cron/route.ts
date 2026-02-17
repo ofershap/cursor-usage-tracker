@@ -38,7 +38,9 @@ export async function POST(request: Request) {
 
     if (detectionResult.newAnomalies.length > 0) {
       const pairs = processNewAnomalies(detectionResult.newAnomalies);
-      const alertResult = await sendAlerts(pairs);
+      const alertResult = await sendAlerts(pairs, {
+        dashboardUrl: process.env.DASHBOARD_URL,
+      });
       results.alerts = alertResult;
     }
   } catch (error) {

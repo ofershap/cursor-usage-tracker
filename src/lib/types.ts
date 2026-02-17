@@ -384,9 +384,9 @@ export interface DetectionConfig {
 
 export const DEFAULT_CONFIG: DetectionConfig = {
   thresholds: {
-    maxSpendCentsPerCycle: 20000,
-    maxRequestsPerDay: 200,
-    maxTokensPerDay: 5_000_000,
+    maxSpendCentsPerCycle: 0,
+    maxRequestsPerDay: 0,
+    maxTokensPerDay: 0,
   },
   zscore: {
     multiplier: 2.5,

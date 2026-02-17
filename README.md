@@ -5,8 +5,7 @@
 <h1 align="center">Cursor Usage Tracker</h1>
 
 <p align="center">
-  AI spend monitoring, anomaly detection, and alerting for teams on Cursor Enterprise.<br>
-  Know who's burning through your budget before the invoice tells you.
+  Know who's burning through your AI budget before the invoice tells you.
 </p>
 
 <p align="center">
@@ -21,7 +20,7 @@
 
 ---
 
-## Why This Exists
+## AI Spend Is a Blind Spot
 
 Engineering costs used to be two things: headcount and cloud infrastructure. You had tools for both. Then AI coding assistants showed up, and suddenly there's a third cost center that nobody has good tooling for.
 
@@ -69,7 +68,7 @@ Every alert includes who, what model, how much, and a link to their dashboard pa
 
 | Layer          | Method        | What it catches                                                             |
 | -------------- | ------------- | --------------------------------------------------------------------------- |
-| **Thresholds** | Static limits | Spend > $50/cycle, > 500 requests/day, > 5M tokens/day                      |
+| **Thresholds** | Static limits | Optional hard caps on spend, requests, or tokens (disabled by default)      |
 | **Z-Score**    | Statistical   | User 2+ standard deviations above team mean                                 |
 | **Trends**     | Behavioral    | Personal spikes, sustained drift above P75, model shift to expensive models |
 
@@ -91,8 +90,8 @@ Anomaly Detected ──→ Alert Sent ──→ Acknowledged ──→ Resolved
 
 ### Rich Alerting
 
-- **Slack**: Block Kit messages with severity, user, model, value vs threshold, and dashboard links
-- **Email**: HTML-formatted alerts with the same context
+- **Slack**: Block Kit messages via bot token (`chat.postMessage`) with severity, user, model, value vs threshold, and dashboard links
+- **Email**: HTML-formatted alerts via [Resend](https://resend.com) (one API key, no SMTP config)
 
 ### Web Dashboard
 
@@ -136,20 +135,19 @@ Edit `.env`:
 # Required
 CURSOR_ADMIN_API_KEY=your_admin_api_key
 
-# Alerting (at least one recommended)
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../xxx
+# Alerting — Slack (at least one alerting channel recommended)
+SLACK_BOT_TOKEN=xoxb-your-bot-token          # bot token with chat:write scope
+SLACK_CHANNEL_ID=C0123456789                  # channel to post alerts to
+
+# Dashboard URL (used in alert links)
+DASHBOARD_URL=http://localhost:3000
 
 # Optional
-CURSOR_ANALYTICS_API_KEY=your_analytics_key   # for Insights page (DAU, model breakdowns, MCP)
 CRON_SECRET=your_secret_here                  # protects the cron endpoint
 DASHBOARD_PASSWORD=your_password              # optional basic auth for the dashboard
 
-# Email alerts (optional)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=you@gmail.com
-SMTP_PASS=app_password
-SMTP_FROM=cursor-tracker@yourcompany.com
+# Email alerts via Resend (optional)
+RESEND_API_KEY=re_xxxxxxxxxxxx
 ALERT_EMAIL_TO=team-lead@company.com
 ```
 
@@ -258,9 +256,9 @@ All detection thresholds are configurable via the Settings page or the API:
 
 | Setting              | Default | What it does                                      |
 | -------------------- | ------- | ------------------------------------------------- |
-| Max spend per cycle  | $200    | Alert when a user exceeds this in a billing cycle |
-| Max requests per day | 200     | Alert on excessive daily request count            |
-| Max tokens per day   | 5M      | Alert on excessive daily token consumption        |
+| Max spend per cycle  | 0 (off) | Alert when a user exceeds this in a billing cycle |
+| Max requests per day | 0 (off) | Alert on excessive daily request count            |
+| Max tokens per day   | 0 (off) | Alert on excessive daily token consumption        |
 | Z-score multiplier   | 2.5     | How many standard deviations above mean to flag   |
 | Z-score window       | 7 days  | Historical window for statistical comparison      |
 | Spike multiplier     | 3.0x    | Alert when today > N× user's personal average     |

@@ -1,20 +1,10 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import type { Anomaly, Incident } from "../types";
 
-function getTransporter() {
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT ?? "587", 10);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-
-  if (!host || !user || !pass) return null;
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
-  });
+function getClient(): Resend | null {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return null;
+  return new Resend(key);
 }
 
 function formatValue(metric: string, value: number): string {
@@ -69,22 +59,26 @@ export async function sendEmailAlert(
   incident: Incident,
   options: { to?: string; dashboardUrl?: string } = {},
 ): Promise<boolean> {
-  const transporter = getTransporter();
-  if (!transporter) return false;
+  const resend = getClient();
+  if (!resend) return false;
 
   const to = options.to ?? process.env.ALERT_EMAIL_TO;
   if (!to) return false;
 
-  const from = process.env.SMTP_FROM ?? "cursor-tracker@noreply.com";
+  const from = process.env.RESEND_FROM ?? "Cursor Tracker <alerts@resend.dev>";
   const severityPrefix = anomaly.severity === "critical" ? "[CRITICAL]" : "[WARNING]";
 
   try {
-    await transporter.sendMail({
+    const { error } = await resend.emails.send({
       from,
       to,
       subject: `${severityPrefix} Cursor Usage Alert: ${anomaly.userEmail} — ${anomaly.metric}`,
       html: buildHtml(anomaly, incident, options.dashboardUrl),
     });
+    if (error) {
+      console.error("[email] Resend error:", error.message);
+      return false;
+    }
     return true;
   } catch {
     console.error("[email] Failed to send alert email");

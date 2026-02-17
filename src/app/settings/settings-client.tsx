@@ -61,7 +61,7 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <Section title="Static Thresholds" description="Hard limits that trigger immediate alerts">
+        <Section title="Static Thresholds" description="Hard limits per user. Set to 0 to disable.">
           <Field
             label="Max spend / cycle"
             value={config.thresholds.maxSpendCentsPerCycle}
@@ -71,7 +71,12 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
                 thresholds: { ...config.thresholds, maxSpendCentsPerCycle: v },
               })
             }
-            suffix={`$${(config.thresholds.maxSpendCentsPerCycle / 100).toFixed(0)}`}
+            suffix={
+              config.thresholds.maxSpendCentsPerCycle > 0
+                ? `$${(config.thresholds.maxSpendCentsPerCycle / 100).toFixed(0)}`
+                : undefined
+            }
+            hint={config.thresholds.maxSpendCentsPerCycle === 0 ? "disabled" : undefined}
             unit="cents"
           />
           <Field
@@ -83,6 +88,7 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
                 thresholds: { ...config.thresholds, maxRequestsPerDay: v },
               })
             }
+            hint={config.thresholds.maxRequestsPerDay === 0 ? "disabled" : undefined}
             unit="reqs"
           />
           <Field
@@ -94,7 +100,12 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
                 thresholds: { ...config.thresholds, maxTokensPerDay: v },
               })
             }
-            suffix={`${(config.thresholds.maxTokensPerDay / 1_000_000).toFixed(1)}M`}
+            suffix={
+              config.thresholds.maxTokensPerDay > 0
+                ? `${(config.thresholds.maxTokensPerDay / 1_000_000).toFixed(1)}M`
+                : undefined
+            }
+            hint={config.thresholds.maxTokensPerDay === 0 ? "disabled" : undefined}
             unit="tokens"
           />
         </Section>

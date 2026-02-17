@@ -72,10 +72,10 @@
     "@tailwindcss/postcss": "^4.1.18",
     "better-sqlite3": "^12.6.2",
     "next": "^16.1.6",
-    "nodemailer": "^8.0.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "recharts": "^3.7.0",
+    "resend": "^6.9.2",
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
@@ -85,7 +85,6 @@
     "@semantic-release/git": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.2.3",
-    "@types/nodemailer": "^7.0.10",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.2",
