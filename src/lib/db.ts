@@ -19,7 +19,7 @@ import type {
 } from "./types";
 import { DEFAULT_CONFIG } from "./types";
 
-const DB_PATH = path.join(process.cwd(), "data", "tracker.db");
+const DB_PATH = process.env.DATABASE_PATH ?? path.join(process.cwd(), "data", "tracker.db");
 
 let dbInstance: Database.Database | null = null;
 
@@ -745,7 +745,13 @@ export function getConfig(): DetectionConfig {
     | undefined;
 
   if (!row) return DEFAULT_CONFIG;
-  return JSON.parse(row.value) as DetectionConfig;
+  const stored = JSON.parse(row.value) as Partial<DetectionConfig>;
+  return {
+    thresholds: { ...DEFAULT_CONFIG.thresholds, ...stored.thresholds },
+    zscore: { ...DEFAULT_CONFIG.zscore, ...stored.zscore },
+    trends: { ...DEFAULT_CONFIG.trends, ...stored.trends },
+    cronIntervalMinutes: stored.cronIntervalMinutes ?? DEFAULT_CONFIG.cronIntervalMinutes,
+  };
 }
 
 export function saveConfig(config: DetectionConfig): void {

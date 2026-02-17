@@ -61,7 +61,7 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <Section title="Static Thresholds" description="Hard limits that trigger immediate alerts">
+        <Section title="Static Thresholds" description="Hard limits per user. Set to 0 to disable.">
           <Field
             label="Max spend / cycle"
             value={config.thresholds.maxSpendCentsPerCycle}
@@ -71,7 +71,12 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
                 thresholds: { ...config.thresholds, maxSpendCentsPerCycle: v },
               })
             }
-            suffix={`$${(config.thresholds.maxSpendCentsPerCycle / 100).toFixed(0)}`}
+            suffix={
+              config.thresholds.maxSpendCentsPerCycle > 0
+                ? `$${(config.thresholds.maxSpendCentsPerCycle / 100).toFixed(0)}`
+                : undefined
+            }
+            hint={config.thresholds.maxSpendCentsPerCycle === 0 ? "disabled" : undefined}
             unit="cents"
           />
           <Field
@@ -83,6 +88,7 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
                 thresholds: { ...config.thresholds, maxRequestsPerDay: v },
               })
             }
+            hint={config.thresholds.maxRequestsPerDay === 0 ? "disabled" : undefined}
             unit="reqs"
           />
           <Field
@@ -94,7 +100,12 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
                 thresholds: { ...config.thresholds, maxTokensPerDay: v },
               })
             }
-            suffix={`${(config.thresholds.maxTokensPerDay / 1_000_000).toFixed(1)}M`}
+            suffix={
+              config.thresholds.maxTokensPerDay > 0
+                ? `${(config.thresholds.maxTokensPerDay / 1_000_000).toFixed(1)}M`
+                : undefined
+            }
+            hint={config.thresholds.maxTokensPerDay === 0 ? "disabled" : undefined}
             unit="tokens"
           />
         </Section>
@@ -118,41 +129,41 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
           />
         </Section>
 
-        <Section title="Trend Detection" description="Detect sudden spikes and sustained drift">
+        <Section title="Spend Trend Detection" description="Detect spend spikes and cycle outliers">
           <Field
-            label="Spike multiplier"
-            value={config.trends.spikeMultiplier}
+            label="Spend spike multiplier"
+            value={config.trends.spendSpikeMultiplier}
             onChange={(v) =>
               setConfig({
                 ...config,
-                trends: { ...config.trends, spikeMultiplier: v },
+                trends: { ...config.trends, spendSpikeMultiplier: v },
               })
             }
             step={0.5}
-            hint="today > N × avg"
+            hint="today spend > N × avg"
           />
           <Field
             label="Spike lookback"
-            value={config.trends.spikeLookbackDays}
+            value={config.trends.spendSpikeLookbackDays}
             onChange={(v) =>
               setConfig({
                 ...config,
-                trends: { ...config.trends, spikeLookbackDays: v },
+                trends: { ...config.trends, spendSpikeLookbackDays: v },
               })
             }
             unit="days"
           />
           <Field
-            label="Drift threshold"
-            value={config.trends.driftDaysAboveP75}
+            label="Cycle outlier multiplier"
+            value={config.trends.cycleOutlierMultiplier}
             onChange={(v) =>
               setConfig({
                 ...config,
-                trends: { ...config.trends, driftDaysAboveP75: v },
+                trends: { ...config.trends, cycleOutlierMultiplier: v },
               })
             }
-            unit="days"
-            hint="consecutive > P75"
+            step={0.5}
+            hint="cycle spend > N × team median"
           />
         </Section>
 

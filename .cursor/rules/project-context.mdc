@@ -43,11 +43,11 @@ Single cron endpoint `POST /api/cron` does both: collect → detect → alert in
 | `src/lib/collector.ts` | Data collection pipeline (members, daily usage, spending, events, analytics, groups) |
 | `src/lib/anomaly/detector.ts` | Orchestrator — runs all 3 detection layers, deduplicates |
 | `src/lib/anomaly/thresholds.ts` | Layer 1: static limits (spend, requests, tokens) |
-| `src/lib/anomaly/zscore.ts` | Layer 2: statistical z-score vs team mean |
-| `src/lib/anomaly/trends.ts` | Layer 3: personal spikes, drift above P75, model shift |
+| `src/lib/anomaly/zscore.ts` | Layer 2: statistical z-score on daily spend vs active team mean |
+| `src/lib/anomaly/trends.ts` | Layer 3: daily spend spikes, cycle spend outliers |
 | `src/lib/incidents.ts` | Incident lifecycle: create, alert, acknowledge, resolve + MTTD/MTTI/MTTR |
-| `src/lib/alerts/slack.ts` | Slack webhook with block-kit messages |
-| `src/lib/alerts/email.ts` | SMTP email with HTML templates |
+| `src/lib/alerts/slack.ts` | Slack bot token + chat.postMessage with block-kit messages |
+| `src/lib/alerts/email.ts` | Email alerts via Resend with HTML templates |
 | `src/lib/date-utils.ts` | Date formatting helpers (formatDateShort, formatDateTick, formatDateLabel) |
 | `src/lib/format-utils.ts` | Model name shortening (MODEL_MAP regex → short labels) |
 | `src/app/api/cron/route.ts` | Main cron endpoint (collect + detect + alert) |
@@ -85,5 +85,5 @@ members, daily_usage, spending, usage_events, anomalies, incidents, config, coll
 ## Important Caveats
 
 - API response shapes may not exactly match the live Cursor API. If real responses differ, update `src/lib/types.ts` and `src/lib/cursor-client.ts`.
-- Trend detection can produce duplicate dedup keys (spike + drift both emit `trend:tokens` for same user) — first one wins, second is silently dropped.
+- Trend detection can produce duplicate dedup keys (spend spike + cycle outlier both emit `trend:spend` for same user) — first one wins, second is silently dropped.
 - CLI scripts (`npm run collect`, `npm run detect`) do NOT auto-load `.env` — use `source .env && export CURSOR_ADMIN_API_KEY` or run via the Next.js dev server cron endpoint instead.

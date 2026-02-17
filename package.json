@@ -3,7 +3,6 @@
   "version": "0.0.0-development",
   "description": "Open-source Cursor IDE usage monitoring, anomaly detection, and alerting for enterprise teams",
   "type": "module",
-  "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -16,7 +15,9 @@
     "format": "prettier --write .",
     "prepare": "husky",
     "collect": "tsx src/lib/cli/collect.ts",
-    "detect": "tsx src/lib/cli/detect.ts"
+    "detect": "tsx src/lib/cli/detect.ts",
+    "generate:mock": "tsx scripts/generate-mock-db.ts",
+    "dev:mock": "DATABASE_PATH=data/mock.db next dev"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
@@ -35,6 +36,7 @@
       "@semantic-release/commit-analyzer",
       "@semantic-release/release-notes-generator",
       "@semantic-release/changelog",
+      "@semantic-release/npm",
       "@semantic-release/github",
       [
         "@semantic-release/git",
@@ -48,6 +50,12 @@
       ]
     ]
   },
+  "bin": {
+    "cursor-usage-tracker": "bin/create.mjs"
+  },
+  "files": [
+    "bin/"
+  ],
   "keywords": [
     "cursor",
     "cursor-ide",
@@ -72,10 +80,10 @@
     "@tailwindcss/postcss": "^4.1.18",
     "better-sqlite3": "^12.6.2",
     "next": "^16.1.6",
-    "nodemailer": "^8.0.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "recharts": "^3.7.0",
+    "resend": "^6.9.2",
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
@@ -85,7 +93,6 @@
     "@semantic-release/git": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.2.3",
-    "@types/nodemailer": "^7.0.10",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.2",

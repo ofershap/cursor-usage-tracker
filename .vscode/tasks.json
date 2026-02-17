@@ -21,6 +21,25 @@
       }
     },
     {
+      "label": "Dev Server (Mock Data)",
+      "type": "shell",
+      "command": "npm run dev:mock -- --turbopack -p 3456",
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": {
+        "group": "cursor-tracker",
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": true,
+        "reveal": "always",
+        "focus": false
+      },
+      "icon": {
+        "id": "globe",
+        "color": "terminal.ansiYellow"
+      }
+    },
+    {
       "label": "Collect Data",
       "type": "shell",
       "command": "npm run collect",

@@ -329,7 +329,7 @@ export interface GroupsResponse {
 
 export type AnomalySeverity = "warning" | "critical";
 export type AnomalyType = "threshold" | "zscore" | "trend";
-export type AnomalyMetric = "spend" | "requests" | "tokens" | "usage_based" | "model_shift";
+export type AnomalyMetric = "spend" | "requests" | "tokens" | "usage_based";
 
 export interface Anomaly {
   id?: number;
@@ -375,27 +375,27 @@ export interface DetectionConfig {
     windowDays: number;
   };
   trends: {
-    spikeMultiplier: number;
-    spikeLookbackDays: number;
-    driftDaysAboveP75: number;
+    spendSpikeMultiplier: number;
+    spendSpikeLookbackDays: number;
+    cycleOutlierMultiplier: number;
   };
   cronIntervalMinutes: number;
 }
 
 export const DEFAULT_CONFIG: DetectionConfig = {
   thresholds: {
-    maxSpendCentsPerCycle: 20000,
-    maxRequestsPerDay: 200,
-    maxTokensPerDay: 5_000_000,
+    maxSpendCentsPerCycle: 0,
+    maxRequestsPerDay: 0,
+    maxTokensPerDay: 0,
   },
   zscore: {
     multiplier: 2.5,
     windowDays: 7,
   },
   trends: {
-    spikeMultiplier: 3,
-    spikeLookbackDays: 7,
-    driftDaysAboveP75: 3,
+    spendSpikeMultiplier: 5,
+    spendSpikeLookbackDays: 7,
+    cycleOutlierMultiplier: 10,
   },
   cronIntervalMinutes: 60,
 };

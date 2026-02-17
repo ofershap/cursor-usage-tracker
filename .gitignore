@@ -2,6 +2,7 @@ node_modules/
 .next/
 dist/
 data/*.db
+!data/mock.db
 data/*.db-journal
 data/*.db-shm
 data/*.db-wal
