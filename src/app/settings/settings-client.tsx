@@ -3,12 +3,18 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { DetectionConfig } from "@/lib/types";
 
+interface MemberInfo {
+  email: string;
+  name: string;
+}
+
 interface GroupData {
   id: string;
   name: string;
   member_count: number;
   spend_cents: number;
   emails: string[];
+  members: MemberInfo[];
 }
 
 interface SettingsClientProps {
@@ -277,7 +283,7 @@ function BillingGroupsManager() {
 
   const isSearching = search.trim().length > 0;
 
-  const allEmails = groups.flatMap((g) => g.emails);
+  const allMembers = groups.flatMap((g) => g.members);
 
   const displayGroup =
     filter === "unassigned"
@@ -286,11 +292,15 @@ function BillingGroupsManager() {
         ? null
         : groups.find((g) => g.id === filter);
 
-  const displayEmails = displayGroup ? displayGroup.emails : allEmails;
+  const displayMembers = displayGroup ? displayGroup.members : allMembers;
 
-  const filteredEmails = isSearching
-    ? allEmails.filter((e) => e.toLowerCase().includes(search.toLowerCase()))
-    : displayEmails;
+  const searchLower = search.toLowerCase();
+  const filteredMembers = isSearching
+    ? allMembers.filter(
+        (m) =>
+          m.email.toLowerCase().includes(searchLower) || m.name.toLowerCase().includes(searchLower),
+      )
+    : displayMembers;
 
   async function handleRename(groupId: string, name: string) {
     setBusy(true);
@@ -472,14 +482,14 @@ function BillingGroupsManager() {
           <div className="flex items-center gap-1.5">
             <input
               type="text"
-              placeholder="Find member across all groups..."
+              placeholder="Search by name or email..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="bg-zinc-800 border border-zinc-700 rounded-md px-2 py-1 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50 w-56"
             />
             {isSearching && (
               <span className="text-[10px] text-zinc-500">
-                {filteredEmails.length} result{filteredEmails.length !== 1 ? "s" : ""}
+                {filteredMembers.length} result{filteredMembers.length !== 1 ? "s" : ""}
               </span>
             )}
           </div>
@@ -490,24 +500,26 @@ function BillingGroupsManager() {
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-zinc-900">
             <tr className="text-zinc-500 border-b border-zinc-800">
+              <th className="text-left py-1.5 px-2 font-medium">Name</th>
               <th className="text-left py-1.5 px-2 font-medium">Email</th>
               <th className="text-left py-1.5 px-2 font-medium">Current Group</th>
               <th className="text-right py-1.5 px-2 font-medium">Reassign to</th>
             </tr>
           </thead>
           <tbody>
-            {filteredEmails.map((email) => {
-              const currentGroup = groups.find((g) => g.emails.includes(email));
+            {filteredMembers.map((member) => {
+              const currentGroup = groups.find((g) => g.emails.includes(member.email));
               return (
-                <tr key={email} className="border-b border-zinc-800/30 hover:bg-zinc-800/30">
-                  <td className="py-1 px-2 text-zinc-300 font-mono">{email}</td>
+                <tr key={member.email} className="border-b border-zinc-800/30 hover:bg-zinc-800/30">
+                  <td className="py-1 px-2 text-zinc-200">{member.name || "—"}</td>
+                  <td className="py-1 px-2 text-zinc-400 font-mono">{member.email}</td>
                   <td className="py-1 px-2 text-zinc-500">{currentGroup?.name ?? "—"}</td>
                   <td className="py-1 px-2 text-right">
                     <select
                       disabled={busy}
                       defaultValue=""
                       onChange={(e) => {
-                        if (e.target.value) handleAssign(email, e.target.value);
+                        if (e.target.value) handleAssign(member.email, e.target.value);
                         e.target.value = "";
                       }}
                       className="bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-[10px] text-zinc-300 focus:outline-none"
@@ -527,9 +539,9 @@ function BillingGroupsManager() {
                 </tr>
               );
             })}
-            {filteredEmails.length === 0 && (
+            {filteredMembers.length === 0 && (
               <tr>
-                <td colSpan={3} className="py-4 text-center text-zinc-600 text-xs">
+                <td colSpan={4} className="py-4 text-center text-zinc-600 text-xs">
                   No members found
                 </td>
               </tr>

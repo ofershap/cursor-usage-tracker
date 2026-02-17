@@ -581,28 +581,34 @@ export function getGroupsWithMembers(): Array<{
   member_count: number;
   spend_cents: number;
   emails: string[];
+  members: Array<{ email: string; name: string }>;
 }> {
   const db = getDb();
   const groups = db
     .prepare("SELECT id, name, member_count, spend_cents FROM billing_groups ORDER BY name")
     .all() as Array<{ id: string; name: string; member_count: number; spend_cents: number }>;
 
-  const memberRows = db.prepare("SELECT group_id, email FROM group_members").all() as Array<{
-    group_id: string;
-    email: string;
-  }>;
+  const memberRows = db
+    .prepare(
+      "SELECT gm.group_id, gm.email, COALESCE(m.name, '') as name FROM group_members gm LEFT JOIN members m ON gm.email = m.email",
+    )
+    .all() as Array<{ group_id: string; email: string; name: string }>;
 
-  const membersByGroup = new Map<string, string[]>();
+  const membersByGroup = new Map<string, Array<{ email: string; name: string }>>();
   for (const row of memberRows) {
     const list = membersByGroup.get(row.group_id) ?? [];
-    list.push(row.email);
+    list.push({ email: row.email, name: row.name });
     membersByGroup.set(row.group_id, list);
   }
 
-  return groups.map((g) => ({
-    ...g,
-    emails: membersByGroup.get(g.id) ?? [],
-  }));
+  return groups.map((g) => {
+    const memberList = membersByGroup.get(g.id) ?? [];
+    return {
+      ...g,
+      emails: memberList.map((m) => m.email),
+      members: memberList,
+    };
+  });
 }
 
 export function insertAnomaly(anomaly: Anomaly): number {
