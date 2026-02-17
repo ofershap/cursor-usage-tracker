@@ -496,7 +496,9 @@ export function upsertBillingGroups(
 export function getUserDailySpend(email: string): Array<{ date: string; spend_cents: number }> {
   const db = getDb();
   return db
-    .prepare("SELECT date, spend_cents FROM daily_spend WHERE email = ? ORDER BY date")
+    .prepare(
+      "SELECT date, MAX(spend_cents) as spend_cents FROM daily_spend WHERE email = ? GROUP BY date ORDER BY date",
+    )
     .all(email) as Array<{ date: string; spend_cents: number }>;
 }
 
@@ -800,7 +802,10 @@ export function getFullDashboard(days: number = 7): FullDashboard {
 
   const spendRow = db
     .prepare(
-      "SELECT COALESCE(SUM(spend_cents), 0) as total FROM daily_spend WHERE date >= date('now', ?)",
+      `SELECT COALESCE(SUM(spend), 0) as total FROM (
+        SELECT date, email, MAX(spend_cents) as spend FROM daily_spend
+        WHERE date >= date('now', ?) GROUP BY date, email
+      )`,
     )
     .get(dateFilter) as { total: number };
 
@@ -836,9 +841,14 @@ export function getFullDashboard(days: number = 7): FullDashboard {
 
   const rankedUsers = db
     .prepare(
-      `WITH user_spend AS (
-        SELECT email, SUM(spend_cents) as spend_cents
+      `WITH deduped_spend AS (
+        SELECT date, email, MAX(spend_cents) as spend_cents
         FROM daily_spend WHERE date >= date('now', ?)
+        GROUP BY date, email
+      ),
+      user_spend AS (
+        SELECT email, SUM(spend_cents) as spend_cents
+        FROM deduped_spend
         GROUP BY email
       ),
       activity AS (
@@ -884,9 +894,10 @@ export function getFullDashboard(days: number = 7): FullDashboard {
   const teamDailySpend = db
     .prepare(
       `
-    SELECT date, SUM(spend_cents) as spend_cents
-    FROM daily_spend WHERE date >= date('now', ?)
-    GROUP BY date ORDER BY date
+    SELECT date, SUM(spend) as spend_cents FROM (
+      SELECT date, email, MAX(spend_cents) as spend FROM daily_spend
+      WHERE date >= date('now', ?) GROUP BY date, email
+    ) GROUP BY date ORDER BY date
   `,
     )
     .all(chartDateFilter) as Array<{ date: string; spend_cents: number }>;
@@ -897,9 +908,14 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     SELECT ds.date, ds.email,
       COALESCE(m.name, ds.email) as name,
       ds.spend_cents
-    FROM daily_spend ds
+    FROM (
+      SELECT date, email, MAX(spend_cents) as spend_cents
+      FROM daily_spend
+      WHERE date >= date('now', ?)
+      GROUP BY date, email
+    ) ds
     LEFT JOIN members m ON ds.email = m.email
-    WHERE ds.spend_cents > 0 AND ds.date >= date('now', ?)
+    WHERE ds.spend_cents > 0
     ORDER BY ds.date, ds.spend_cents DESC
   `,
     )
@@ -922,9 +938,14 @@ export function getFullDashboard(days: number = 7): FullDashboard {
       SELECT email, most_used_model FROM user_model
       WHERE (email, reqs) IN (SELECT email, MAX(reqs) FROM user_model GROUP BY email)
     ),
+    deduped AS (
+      SELECT date, email, MAX(spend_cents) as spend_cents
+      FROM daily_spend WHERE date >= date('now', ?)
+      GROUP BY date, email
+    ),
     user_spend AS (
       SELECT email, SUM(spend_cents) as spend_cents
-      FROM daily_spend WHERE date >= date('now', ?)
+      FROM deduped
       GROUP BY email
     )
     SELECT pm.most_used_model as model, COUNT(*) as users,
@@ -1118,9 +1139,9 @@ export function getTeamDailySpend(): Array<{ date: string; spend_cents: number }
   return db
     .prepare(
       `
-    SELECT date, SUM(spend_cents) as spend_cents
-    FROM daily_spend
-    GROUP BY date ORDER BY date
+    SELECT date, SUM(spend) as spend_cents FROM (
+      SELECT date, email, MAX(spend_cents) as spend FROM daily_spend GROUP BY date, email
+    ) GROUP BY date ORDER BY date
   `,
     )
     .all() as Array<{ date: string; spend_cents: number }>;
@@ -1139,7 +1160,10 @@ export function getDailySpendBreakdown(): Array<{
     SELECT ds.date, ds.email,
       COALESCE(m.name, ds.email) as name,
       ds.spend_cents
-    FROM daily_spend ds
+    FROM (
+      SELECT date, email, MAX(spend_cents) as spend_cents
+      FROM daily_spend GROUP BY date, email
+    ) ds
     LEFT JOIN members m ON ds.email = m.email
     WHERE ds.spend_cents > 0
     ORDER BY ds.date, ds.spend_cents DESC
@@ -1281,9 +1305,7 @@ export function upsertAnalyticsClientVersions(entries: AnalyticsClientVersionsEn
   tx();
 }
 
-export function getAnalyticsDAU(
-  days: number = 30,
-): Array<{
+export function getAnalyticsDAU(days: number = 30): Array<{
   date: string;
   dau: number;
   cli_dau: number;
@@ -1320,9 +1342,7 @@ export function getAnalyticsModelUsageTrend(
   }>;
 }
 
-export function getAnalyticsModelUsageSummary(
-  days: number = 30,
-): Array<{
+export function getAnalyticsModelUsageSummary(days: number = 30): Array<{
   model: string;
   total_messages: number;
   total_users: number;
@@ -1346,9 +1366,7 @@ export function getAnalyticsModelUsageSummary(
   }>;
 }
 
-export function getAnalyticsAgentEditsTrend(
-  days: number = 30,
-): Array<{
+export function getAnalyticsAgentEditsTrend(days: number = 30): Array<{
   date: string;
   accepted_diffs: number;
   rejected_diffs: number;
@@ -1476,7 +1494,10 @@ export function getModelEfficiency(): ModelEfficiency[] {
         THEN ROUND(SUM(ds.spend_cents) / 100.0 / SUM(du.accepted_lines_added), 4)
         ELSE 0 END as cost_per_useful_line
     FROM daily_usage du
-    JOIN daily_spend ds ON du.email = ds.email AND du.date = ds.date
+    JOIN (
+      SELECT date, email, MAX(spend_cents) as spend_cents
+      FROM daily_spend GROUP BY date, email
+    ) ds ON du.email = ds.email AND du.date = ds.date
     WHERE du.is_active = 1
       AND du.most_used_model != ''
       AND du.agent_requests > 0

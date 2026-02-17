@@ -126,6 +126,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   }
 
   const timeLabel = formatTimeLabel(days);
+  const isSearching = search.trim().length > 0;
   const totalLines = stats.dailyTeamActivity.reduce((s, d) => s + d.total_lines_added, 0);
   const effectiveDays = Math.min(days, stats.cycleDays);
   const cycleStartDate = new Date(stats.cycleStart);
@@ -141,9 +142,44 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   );
   const daysLeft = Math.max(0, Math.ceil((cycleEndDate.getTime() - Date.now()) / 86_400_000));
 
+  const filteredEmails = useMemo(() => new Set(filteredUsers.map((u) => u.email)), [filteredUsers]);
+
+  const filteredSpendCents = useMemo(
+    () =>
+      isSearching ? filteredUsers.reduce((s, u) => s + u.spend_cents, 0) : stats.totalSpendCents,
+    [isSearching, filteredUsers, stats.totalSpendCents],
+  );
+  const filteredAgentRequests = useMemo(
+    () =>
+      isSearching
+        ? filteredUsers.reduce((s, u) => s + u.agent_requests, 0)
+        : stats.totalAgentRequests,
+    [isSearching, filteredUsers, stats.totalAgentRequests],
+  );
+  const filteredLinesAdded = useMemo(
+    () => (isSearching ? filteredUsers.reduce((s, u) => s + u.lines_added, 0) : totalLines),
+    [isSearching, filteredUsers, totalLines],
+  );
+
+  const filteredBreakdown = useMemo(() => {
+    if (!isSearching) return data.dailySpendBreakdown;
+    return data.dailySpendBreakdown.filter((r) => filteredEmails.has(r.email));
+  }, [isSearching, data.dailySpendBreakdown, filteredEmails]);
+
+  const filteredTeamDailySpend = useMemo(() => {
+    if (!isSearching) return data.teamDailySpend;
+    const byDate = new Map<string, number>();
+    for (const r of filteredBreakdown) {
+      byDate.set(r.date, (byDate.get(r.date) ?? 0) + r.spend_cents);
+    }
+    return [...byDate.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, spend_cents]) => ({ date, spend_cents }));
+  }, [isSearching, data.teamDailySpend, filteredBreakdown]);
+
   const dailySpendData = useMemo(() => {
-    return buildDailySpendData(data.dailySpendBreakdown);
-  }, [data.dailySpendBreakdown]);
+    return buildDailySpendData(filteredBreakdown);
+  }, [filteredBreakdown]);
 
   return (
     <div className="space-y-3">
@@ -170,15 +206,18 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
           ))}
         </div>
         {loading && <span className="text-[11px] text-zinc-500 animate-pulse">Updating...</span>}
-        <div className="ml-auto text-[11px] text-zinc-600">{stats.totalMembers} members</div>
+        <div className="ml-auto text-[11px] text-zinc-600">
+          {isSearching ? `${filteredUsers.length} / ` : ""}
+          {stats.totalMembers} members
+        </div>
       </div>
 
       {/* ── KPI Strip ── */}
       <div className="flex items-stretch gap-2 overflow-x-auto">
         <Kpi
-          label={`Team Spend (${timeLabel})`}
-          value={`$${Math.round(stats.totalSpendCents / 100).toLocaleString()}`}
-          sub={`~$${Math.round(stats.totalSpendCents / 100 / (effectiveDays || 1))}/day`}
+          label={`${isSearching ? "Filtered" : "Team"} Spend (${timeLabel})`}
+          value={`$${Math.round(filteredSpendCents / 100).toLocaleString()}`}
+          sub={`~$${Math.round(filteredSpendCents / 100 / (effectiveDays || 1))}/day`}
         />
         <Kpi
           label="Billing Cycle"
@@ -199,18 +238,22 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
         <KpiSep />
         <Kpi
           label={`Active (${timeLabel})`}
-          value={stats.activeMembers.toString()}
-          sub={`${Math.round((stats.activeMembers / stats.totalMembers) * 100)}% of team`}
+          value={isSearching ? filteredUsers.length.toString() : stats.activeMembers.toString()}
+          sub={
+            isSearching
+              ? `${filteredUsers.length} of ${stats.totalMembers} members`
+              : `${Math.round((stats.activeMembers / stats.totalMembers) * 100)}% of team`
+          }
         />
         <Kpi
           label={`Requests (${timeLabel})`}
-          value={fmt(stats.totalAgentRequests)}
-          sub={`~${fmt(Math.round(stats.totalAgentRequests / (effectiveDays || 1)))}/day`}
+          value={fmt(filteredAgentRequests)}
+          sub={`~${fmt(Math.round(filteredAgentRequests / (effectiveDays || 1)))}/day`}
         />
         <Kpi
           label={`Lines (${timeLabel})`}
-          value={fmt(totalLines)}
-          sub={`~${fmt(Math.round(totalLines / (effectiveDays || 1)))}/day`}
+          value={fmt(filteredLinesAdded)}
+          sub={`~${fmt(Math.round(filteredLinesAdded / (effectiveDays || 1)))}/day`}
         />
       </div>
 
@@ -234,7 +277,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
 
       {/* ── Row: Team Spend Trend + Model Cost Breakdown ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <SpendTrendChart data={data.teamDailySpend} selectedDays={days} />
+        <SpendTrendChart data={filteredTeamDailySpend} selectedDays={days} />
         <ModelCostTable data={data.modelCosts} />
       </div>
 
