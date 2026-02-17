@@ -219,26 +219,13 @@ volumes:
 ## Architecture
 
 ```mermaid
-flowchart LR
-    subgraph APIs["Cursor Enterprise APIs"]
-        A1["/teams/members"]
-        A2["/teams/spend"]
-        A3["/teams/daily-usage-data"]
-        A4["/teams/filtered-usage-events"]
-        A5["/teams/groups"]
-        A6["/analytics/team/*"]
-    end
-
-    subgraph Core
-        C["Collector\n(hourly)"]
-        DB[("SQLite\n(local)")]
-        D["Detection Engine\n3 layers"]
-    end
-
-    subgraph Output
-        AL["Alerts\nSlack / Email"]
-        DA["Dashboard\nNext.js"]
-    end
+flowchart TB
+    APIs["Cursor Enterprise APIs\n/teams/members · /teams/spend · /teams/daily-usage-data\n/teams/filtered-usage-events · /teams/groups · /analytics/team/*"]
+    C["Collector (hourly)"]
+    DB[("SQLite (local)")]
+    D["Detection Engine — 3 layers"]
+    AL["Alerts · Slack / Email"]
+    DA["Dashboard · Next.js"]
 
     APIs --> C --> DB --> D
     DB --> DA
