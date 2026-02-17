@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Cursor Usage Tracker",
   description: "Monitor Cursor IDE usage, detect anomalies, and alert on spending spikes",
+  icons: { icon: "/favicon.png" },
 };
 
 function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
@@ -26,8 +28,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-11">
               <div className="flex items-center gap-1">
-                <Link href="/" className="text-sm font-semibold text-white mr-4">
-                  Cursor Tracker
+                <Link href="/" className="flex items-center gap-2 mr-4">
+                  <Image src="/logo.png" alt="" width={22} height={22} aria-hidden />
+                  <span className="text-sm font-semibold text-white">Cursor Tracker</span>
                 </Link>
                 <NavLink href="/">Overview</NavLink>
                 <NavLink href="/insights">Insights</NavLink>

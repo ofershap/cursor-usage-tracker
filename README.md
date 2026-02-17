@@ -1,8 +1,14 @@
-# Cursor Usage Tracker
+<p align="center">
+  <img src="public/logo.png" alt="Cursor Usage Tracker" width="100" height="100" />
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](https://www.typescriptlang.org/)
-[![Docker](https://img.shields.io/badge/Docker-ready-2496ED)](https://www.docker.com/)
+<h1 align="center">Cursor Usage Tracker</h1>
+
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-blue" alt="TypeScript" /></a>
+  <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker-ready-2496ED" alt="Docker" /></a>
+</p>
 
 **Your company has 50+ developers on Cursor. Do you know who's spending $200/day on Claude Opus while everyone else uses Sonnet?**
 
