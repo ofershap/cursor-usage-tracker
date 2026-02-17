@@ -19,7 +19,7 @@ import type {
 } from "./types";
 import { DEFAULT_CONFIG } from "./types";
 
-const DB_PATH = path.join(process.cwd(), "data", "tracker.db");
+const DB_PATH = process.env.DATABASE_PATH ?? path.join(process.cwd(), "data", "tracker.db");
 
 let dbInstance: Database.Database | null = null;
 

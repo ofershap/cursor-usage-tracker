@@ -16,7 +16,9 @@
     "format": "prettier --write .",
     "prepare": "husky",
     "collect": "tsx src/lib/cli/collect.ts",
-    "detect": "tsx src/lib/cli/detect.ts"
+    "detect": "tsx src/lib/cli/detect.ts",
+    "generate:mock": "tsx scripts/generate-mock-db.ts",
+    "dev:mock": "DATABASE_PATH=data/mock.db next dev"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
