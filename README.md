@@ -5,12 +5,37 @@
 <h1 align="center">Cursor Usage Tracker</h1>
 
 <p align="center">
+  AI spend monitoring, anomaly detection, and alerting for teams on Cursor Enterprise.<br>
+  Know who's burning through your budget before the invoice tells you.
+</p>
+
+<p align="center">
+  <a href="https://github.com/ofershap/cursor-usage-tracker/actions/workflows/ci.yml"><img src="https://github.com/ofershap/cursor-usage-tracker/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/ofershap/cursor-usage-tracker/actions/workflows/codeql.yml"><img src="https://github.com/ofershap/cursor-usage-tracker/actions/workflows/codeql.yml/badge.svg" alt="CodeQL" /></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/ofershap/cursor-usage-tracker"><img src="https://api.scorecard.dev/projects/github.com/ofershap/cursor-usage-tracker/badge" alt="OpenSSF Scorecard" /></a>
+  <a href="https://www.bestpractices.dev/projects/11968"><img src="https://www.bestpractices.dev/projects/11968/badge" alt="OpenSSF Best Practices" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-strict-blue" alt="TypeScript" /></a>
   <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/Docker-ready-2496ED" alt="Docker" /></a>
 </p>
 
-**Your company has 50+ developers on Cursor. Do you know who's spending $200/day on Claude Opus while everyone else uses Sonnet?**
+---
+
+## Why This Exists
+
+Engineering costs used to be two things: headcount and cloud infrastructure. You had tools for both. Then AI coding assistants showed up, and suddenly there's a third cost center that nobody has good tooling for.
+
+A single developer on Cursor can burn through hundreds of dollars a day just by switching to an expensive model or letting an agent loop run wild. Now multiply that by 50, 100, 500 developers. The bill gets big fast, and there's nothing like Datadog or CloudHealth for this category yet.
+
+Cursor's admin dashboard shows you the raw numbers, but it won't tell you when something is off. No anomaly detection. No alerts. No incident tracking. You find out about cost spikes when the invoice lands, weeks after the damage is done.
+
+I built cursor-usage-tracker to fix that. It sits on top of Cursor's Enterprise APIs and gives engineering managers, finance, and platform teams actual visibility into AI spend before it becomes a surprise.
+
+---
+
+## What It Does
+
+Your company has 50+ developers on Cursor. Do you know who's spending $200/day on Claude Opus while everyone else uses Sonnet?
 
 You're about to find out.
 
@@ -18,22 +43,7 @@ You're about to find out.
 
 <sub>Demo animation created with <a href="https://github.com/ofershap/remotion-readme-kit">remotion-readme-kit</a></sub>
 
----
-
-## The Problem
-
-You're managing Cursor for your engineering team. The bill comes in. It's... a lot.
-
-- **Who** is driving the cost?
-- **When** did it start spiking?
-- **Why** — is it a model shift? A runaway agent? Legitimate heavy usage?
-- **How long** until someone notices?
-
-Cursor's built-in dashboard shows data, but has **no anomaly detection** and **no proactive alerting**. You find out about cost spikes when the invoice arrives — weeks too late.
-
-## The Solution
-
-cursor-usage-tracker connects to Cursor's Enterprise APIs, collects usage data, and **automatically detects anomalies** across three layers of intelligence. When something looks off, you get a Slack message or email — not next month, but within the hour.
+It connects to Cursor's Enterprise APIs, collects usage data, and automatically detects anomalies across three layers. When something looks off, you get a Slack message or email within the hour, not next month.
 
 ```
 Developer uses Cursor → API collects data hourly → Engine detects anomaly → You get a Slack alert
@@ -49,7 +59,7 @@ Developer uses Cursor → API collects data hourly → Engine detects anomaly �
 | Someone shifts to expensive models           | `Opus usage jumped from 5% to 45%` → Slack alert        |
 | Usage drifts above team P75 for days         | `Above team P75 for 5 of last 6 days` → Slack alert     |
 
-Every alert includes **who**, **what model**, **how much**, and a **link to their dashboard page** for instant investigation.
+Every alert includes who, what model, how much, and a link to their dashboard page so you can investigate immediately.
 
 ---
 
@@ -75,14 +85,14 @@ Anomaly Detected ──→ Alert Sent ──→ Acknowledged ──→ Resolved
        └────────────────── MTTR ─────────────────────────┘
 ```
 
-- **MTTD** — Mean Time to Detect: how fast the system catches it
-- **MTTI** — Mean Time to Identify: how fast a human acknowledges it
-- **MTTR** — Mean Time to Resolve: how fast it's fixed
+- **MTTD** (Mean Time to Detect): how fast the system catches it
+- **MTTI** (Mean Time to Identify): how fast a human acknowledges it
+- **MTTR** (Mean Time to Resolve): how fast it gets fixed
 
 ### Rich Alerting
 
-- **Slack** — Block Kit messages with severity, user, model, value vs threshold, and dashboard links
-- **Email** — HTML-formatted alerts with the same context
+- **Slack**: Block Kit messages with severity, user, model, value vs threshold, and dashboard links
+- **Email**: HTML-formatted alerts with the same context
 
 ### Web Dashboard
 
@@ -174,9 +184,9 @@ After collecting data, run detection separately:
 npm run detect
 ```
 
-This analyzes the stored data against all three detection layers and sends alerts for any anomalies found.
+This runs the stored data through all three detection layers and sends alerts for anything it finds.
 
-> **Note:** `npm run collect` only fetches data. `npm run detect` only runs detection. The cron endpoint (`POST /api/cron`) does both in one call.
+> `npm run collect` only fetches data. `npm run detect` only runs detection. The cron endpoint (`POST /api/cron`) does both in one call.
 
 ### 6. Set up recurring collection
 
@@ -186,7 +196,7 @@ Trigger the cron endpoint hourly (via crontab, GitHub Actions, or any scheduler)
 curl -X POST http://localhost:3000/api/cron -H "x-cron-secret: YOUR_SECRET"
 ```
 
-This collects data, runs anomaly detection, and sends alerts — all in one call.
+This collects data, runs anomaly detection, and sends alerts in one call.
 
 ---
 
@@ -229,9 +239,9 @@ flowchart TB
     APIs["Cursor Enterprise APIs\n/teams/members · /teams/spend · /teams/daily-usage-data\n/teams/filtered-usage-events · /teams/groups · /analytics/team/*"]
     C["Collector (hourly)"]
     DB[("SQLite (local)")]
-    D["Detection Engine — 3 layers"]
-    AL["Alerts · Slack / Email"]
-    DA["Dashboard · Next.js"]
+    D["Detection Engine, 3 layers"]
+    AL["Alerts: Slack / Email"]
+    DA["Dashboard: Next.js"]
 
     APIs --> C --> DB --> D
     DB --> DA
@@ -258,15 +268,16 @@ All detection thresholds are configurable via the Settings page or the API:
 
 ---
 
-## Group Management & Filtering
+<details>
+<summary><strong>Billing Groups: organize teams by department, group, or custom structure</strong></summary>
 
 Billing groups let you organize team members by department, team, or any structure that fits your org.
 
-### Dashboard Filtering
+**Dashboard Filtering**
 
 The Team Overview page includes a group filter dropdown next to the search bar. Select a group to instantly filter all stats, charts, and the members table to that subset. Groups are displayed in a hierarchical `Parent > Team` format.
 
-### Settings Page
+**Settings Page**
 
 From the Settings page you can:
 
@@ -276,7 +287,10 @@ From the Settings page you can:
 - **Create** new groups manually
 - **Search** across all members to find who's in which group
 
-### HiBob Import
+</details>
+
+<details>
+<summary><strong>HiBob Import: sync your org structure from HiBob's People Directory</strong></summary>
 
 For teams using [HiBob](https://www.hibob.com/) as their HR platform, the Settings page includes an **Import from HiBob** feature:
 
@@ -287,7 +301,9 @@ For teams using [HiBob](https://www.hibob.com/) as their HR platform, the Settin
 
 The import uses HiBob's `Group` and `Team` columns (falling back to `Department`) to build a `Group > Team` hierarchy. Small teams (fewer than 3 members) are automatically consolidated into broader groups to avoid excessive granularity.
 
-> **Note:** The HiBob import updates your local billing groups. It does not push changes back to HiBob or to Cursor's billing API — it only organizes members within the tracker's dashboard.
+> The HiBob import updates your local billing groups only. It does not push changes back to HiBob or to Cursor's billing API.
+
+</details>
 
 ---
 
@@ -312,15 +328,15 @@ The import uses HiBob's `Group` and `Team` columns (falling back to `Department`
 
 ## Tech Stack
 
-| Component  | Technology                            |
-| ---------- | ------------------------------------- |
-| Framework  | Next.js (App Router)                  |
-| Language   | TypeScript (strict mode)              |
-| Database   | SQLite (better-sqlite3) — zero config |
-| Charts     | Recharts                              |
-| Styling    | Tailwind CSS                          |
-| Testing    | Vitest                                |
-| Deployment | Docker (multi-stage)                  |
+| Component  | Technology                           |
+| ---------- | ------------------------------------ |
+| Framework  | Next.js (App Router)                 |
+| Language   | TypeScript (strict mode)             |
+| Database   | SQLite (better-sqlite3), zero config |
+| Charts     | Recharts                             |
+| Styling    | Tailwind CSS                         |
+| Testing    | Vitest                               |
+| Deployment | Docker (multi-stage)                 |
 
 ---
 
@@ -354,9 +370,27 @@ Rate limit: 20 requests/minute (Admin API), 100 requests/minute (Analytics API).
 
 ---
 
+## Security
+
+This project handles sensitive usage and spending data, so security matters here more than most.
+
+- **Vulnerability reporting**: See [SECURITY.md](SECURITY.md) for the disclosure policy. Report vulnerabilities privately via [GitHub Security Advisories](https://github.com/ofershap/cursor-usage-tracker/security/advisories/new), not public issues.
+- **Automated scanning**: Every push and PR goes through [CodeQL](https://codeql.github.com/) (SQL injection, XSS, CSRF, etc.) and [Dependabot](https://docs.github.com/en/code-security/dependabot) for dependency vulnerabilities.
+- **OpenSSF Scorecard**: Continuously evaluated against [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/ofershap/cursor-usage-tracker) security benchmarks.
+- **OpenSSF Best Practices**: [Passing badge](https://www.bestpractices.dev/projects/11968) earned.
+- **Data stays local**: Everything is stored in a local SQLite file. Nothing leaves your infrastructure. No external databases, no cloud services, no telemetry.
+- **Small dependency tree**: Fewer dependencies = smaller attack surface.
+- **Signed releases**: Automated via semantic-release with GitHub-verified provenance.
+
+---
+
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines. Bug reports, feature requests, docs improvements, and code are all welcome. Use [conventional commits](https://www.conventionalcommits.org/) and make sure CI is green before opening a PR.
+
+## Code of Conduct
+
+This project uses the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Author
 
