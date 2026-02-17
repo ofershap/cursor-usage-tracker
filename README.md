@@ -218,27 +218,31 @@ volumes:
 
 ## Architecture
 
-```
-Cursor Enterprise APIs
-  ├── /teams/members
-  ├── /teams/spend
-  ├── /teams/daily-usage-data
-  ├── /teams/filtered-usage-events
-  ├── /teams/groups
-  └── /analytics/team/*
-          │
-          ▼
-    ┌─────────────┐     ┌──────────┐     ┌───────────────────┐
-    │  Collector   │────▶│  SQLite  │────▶│ Detection Engine  │
-    │  (hourly)    │     │  (local) │     │ 3 layers          │
-    └─────────────┘     └──────────┘     └───────────────────┘
-                                                   │
-                                          ┌────────┴────────┐
-                                          ▼                 ▼
-                                    ┌──────────┐    ┌──────────────┐
-                                    │  Alerts   │    │  Dashboard   │
-                                    │ Slack/Email│    │  Next.js     │
-                                    └──────────┘    └──────────────┘
+```mermaid
+flowchart LR
+    subgraph APIs["Cursor Enterprise APIs"]
+        A1["/teams/members"]
+        A2["/teams/spend"]
+        A3["/teams/daily-usage-data"]
+        A4["/teams/filtered-usage-events"]
+        A5["/teams/groups"]
+        A6["/analytics/team/*"]
+    end
+
+    subgraph Core
+        C["Collector\n(hourly)"]
+        DB[("SQLite\n(local)")]
+        D["Detection Engine\n3 layers"]
+    end
+
+    subgraph Output
+        AL["Alerts\nSlack / Email"]
+        DA["Dashboard\nNext.js"]
+    end
+
+    APIs --> C --> DB --> D
+    DB --> DA
+    D --> AL
 ```
 
 **Zero external dependencies.** SQLite stores everything locally. No Postgres, no Redis, no cloud database. Clone, configure, run.
@@ -325,6 +329,13 @@ Rate limit: 20 requests/minute (Admin API), 100 requests/minute (Analytics API).
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+## Author
+
+**Ofer Shapira**
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://linkedin.com/in/ofershap)
+[![GitHub](https://img.shields.io/badge/GitHub-Follow-181717?style=flat&logo=github&logoColor=white)](https://github.com/ofershap)
 
 ## License
 
