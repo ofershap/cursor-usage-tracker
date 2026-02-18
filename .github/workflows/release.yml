@@ -16,12 +16,13 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version: 22
+      - run: npm install -g npm@latest
       - run: npm clean-install
       - run: npm audit signatures
       - run: npm run build
