@@ -2,7 +2,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, copyFileSync } from "node:fs";
-import { resolve, basename } from "node:path";
+import { resolve } from "node:path";
 
 const REPO = "https://github.com/ofershap/cursor-usage-tracker.git";
 const dirName = process.argv[2] || "cursor-usage-tracker";

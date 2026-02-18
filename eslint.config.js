@@ -15,6 +15,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: [".next/", "node_modules/", "data/", "coverage/"],
+    ignores: [".next/", "node_modules/", "data/", "coverage/", "bin/"],
   },
 );
