@@ -127,7 +127,7 @@ export class CursorClient {
     cycleStart: string;
   }> {
     const allMembers: MemberSpend[] = [];
-    let cycleStart = "";
+    let cycleStart: string | undefined;
     let page = 1;
 
     while (true) {
@@ -144,7 +144,7 @@ export class CursorClient {
       page++;
     }
 
-    return { members: allMembers, cycleStart };
+    return { members: allMembers, cycleStart: cycleStart ?? "" };
   }
 
   async getUsageEvents(
