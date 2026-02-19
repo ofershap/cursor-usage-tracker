@@ -598,24 +598,26 @@ function buildMergedDailyData(
       ? dailySpend.reduce((s, d) => s + d.spend_cents, 0) / dailySpend.length / 100
       : 0;
 
-  return [...allDates].sort().map((date) => {
-    const spend = (dailySpend.find((d) => d.date === date)?.spend_cents ?? 0) / 100;
-    const activity = activityMap.get(date);
-    return {
-      date,
-      spend,
-      isSpike: spend > avgSpend * 2.5 && spend > 20,
-      hasActivity: !!activity,
-      agent_requests: activity?.agent_requests ?? 0,
-      usage_based_reqs: activity?.usage_based_reqs ?? 0,
-      lines_added: activity?.lines_added ?? 0,
-      lines_deleted: activity?.lines_deleted ?? 0,
-      total_accepts: activity?.total_accepts ?? 0,
-      tabs_accepted: activity?.tabs_accepted ?? 0,
-      most_used_model: activity?.most_used_model ?? "",
-      client_version: activity?.client_version ?? "",
-    };
-  });
+  return [...allDates]
+    .sort((a, b) => b.localeCompare(a))
+    .map((date) => {
+      const spend = (dailySpend.find((d) => d.date === date)?.spend_cents ?? 0) / 100;
+      const activity = activityMap.get(date);
+      return {
+        date,
+        spend,
+        isSpike: spend > avgSpend * 2.5 && spend > 20,
+        hasActivity: !!activity,
+        agent_requests: activity?.agent_requests ?? 0,
+        usage_based_reqs: activity?.usage_based_reqs ?? 0,
+        lines_added: activity?.lines_added ?? 0,
+        lines_deleted: activity?.lines_deleted ?? 0,
+        total_accepts: activity?.total_accepts ?? 0,
+        tabs_accepted: activity?.tabs_accepted ?? 0,
+        most_used_model: activity?.most_used_model ?? "",
+        client_version: activity?.client_version ?? "",
+      };
+    });
 }
 
 function KpiCard({
