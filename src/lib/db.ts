@@ -501,7 +501,7 @@ export function getUserDailySpend(email: string): Array<{ date: string; spend_ce
   if (!cycleRow?.cycle_start || !spendRows.length) return spendRows;
 
   const spendMap = new Map(spendRows.map((r) => [r.date, r.spend_cents]));
-  const firstSpendDate = spendRows[0].date;
+  const firstSpendDate = spendRows[0]?.date ?? cycleRow.cycle_start;
   const start = new Date(firstSpendDate);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
