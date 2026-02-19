@@ -196,6 +196,27 @@ const MCP_TOOLS = [
   { tool: "query-docs", server: "context7" },
 ];
 
+const COMMANDS = [
+  "generate",
+  "edit",
+  "explain",
+  "refactor",
+  "fix",
+  "test",
+  "review",
+  "document",
+  "optimize",
+  "debug",
+];
+
+const EVENT_KINDS = [
+  "Usage-based",
+  "Included in Business",
+  "Included in Business",
+  "Included in Business",
+  "Errored, Not Charged",
+];
+
 const CLIENT_VERSIONS = [
   "2.2.36",
   "2.2.43",
@@ -461,15 +482,15 @@ function run() {
           metric: "spend",
           value: rand(5000, 20000),
           threshold: rand(2000, 5000),
-          msg: `${user.name}: daily spend spiked to $${rand(50, 200)} (${rand(3, 6)}.${rand(1, 9)}x their 7-day avg) — model: ${user.primaryModel}`,
+          msg: `${user.name}: daily spend spiked to $${rand(50, 200)} (${rand(3, 6)}.${rand(1, 9)}x their 7-day avg) - model: ${user.primaryModel}`,
         },
         {
-          type: "trend",
-          severity: "warning",
-          metric: "spend",
-          value: rand(30000, 100000),
-          threshold: rand(10000, 30000),
-          msg: `${user.name}: cycle spend $${rand(300, 1000)} is ${rand(3, 6)}.${rand(1, 9)}x the team median — model: ${user.primaryModel}`,
+          type: "threshold",
+          severity: "info",
+          metric: "plan_exhausted",
+          value: rand(50, 500),
+          threshold: 0,
+          msg: `${user.name}: exceeded included plan usage on day ${rand(3, 14)} of cycle. ${rand(50, 500)} extra requests billed since.`,
         },
       ];
       const anomaly = pick(types);
@@ -634,9 +655,150 @@ function run() {
   });
   cvTx();
 
+  const eventStmt = db.prepare(
+    `INSERT INTO usage_events (user_email, timestamp, model, kind, max_mode, requests_cost_cents,
+      total_cents, total_tokens, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+      is_chargeable, is_headless) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const eventTx = db.transaction(() => {
+    for (let d = 0; d < DAYS; d++) {
+      const date = dateStr(DAYS - 1 - d);
+      for (const user of userProfiles) {
+        const eventsPerDay =
+          user.activityLevel === "high"
+            ? rand(10, 40)
+            : user.activityLevel === "medium"
+              ? rand(3, 15)
+              : rand(0, 5);
+        for (let e = 0; e < eventsPerDay; e++) {
+          const model =
+            Math.random() < 0.8 ? user.primaryModel : weightedPick(MODELS, MODEL_WEIGHTS);
+          const kind = pick(EVENT_KINDS);
+          const isMax = model.includes("-max") ? 1 : 0;
+          const inputTokens = rand(500, 50000);
+          const outputTokens = rand(100, 20000);
+          const cacheRead = rand(0, inputTokens);
+          const cacheWrite = rand(0, Math.floor(inputTokens * 0.3));
+          const totalCents = +(
+            ((inputTokens + outputTokens) * 0.001 + (isMax ? 2 : 0.3)) *
+            (0.5 + Math.random())
+          ).toFixed(2);
+          const hour = rand(7, 22);
+          const minute = rand(0, 59);
+          const ts = String(
+            new Date(
+              `${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(rand(0, 59)).padStart(2, "0")}Z`,
+            ).getTime(),
+          );
+          eventStmt.run(
+            user.email,
+            ts,
+            model,
+            kind,
+            isMax,
+            totalCents,
+            totalCents,
+            inputTokens + outputTokens,
+            inputTokens,
+            outputTokens,
+            cacheRead,
+            cacheWrite,
+            1,
+            0,
+          );
+        }
+      }
+    }
+  });
+  eventTx();
+
+  const cmdStmt = db.prepare(
+    "INSERT INTO analytics_commands (date, command_name, usage) VALUES (?, ?, ?)",
+  );
+  const cmdTx = db.transaction(() => {
+    for (let d = 0; d < DAYS; d++) {
+      const date = dateStr(DAYS - 1 - d);
+      for (const cmd of COMMANDS) {
+        cmdStmt.run(date, cmd, rand(5, 150));
+      }
+    }
+  });
+  cmdTx();
+
+  const planStmt = db.prepare("INSERT INTO analytics_plans (date, model, usage) VALUES (?, ?, ?)");
+  const planTx = db.transaction(() => {
+    for (let d = 0; d < DAYS; d++) {
+      const date = dateStr(DAYS - 1 - d);
+      for (let m = 0; m < Math.min(5, MODELS.length); m++) {
+        planStmt.run(date, MODELS[m], rand(1, 30));
+      }
+    }
+  });
+  planTx();
+
   const metaStmt = db.prepare("INSERT INTO metadata (key, value, updated_at) VALUES (?, ?, ?)");
   metaStmt.run("cycle_start", CYCLE_START, now);
   metaStmt.run("cycle_end", CYCLE_END, now);
+  metaStmt.run("limited_users_count", "3", now);
+  metaStmt.run("team_budget_threshold", "15000", now);
+
+  const teamAnomalyDetected = `${dateStr(1)} 09:00:00`;
+  const teamAnomalyAlerted = `${dateStr(1)} 09:00:05`;
+  const teamResult = anomalyStmt.run(
+    "team",
+    "threshold",
+    "warning",
+    "users_limited",
+    3,
+    0,
+    "3 team members are limited and unable to make requests. Review team spend limits on the Cursor dashboard.",
+    teamAnomalyDetected,
+    null,
+    teamAnomalyAlerted,
+    null,
+    null,
+    null,
+  );
+  incidentStmt.run(
+    Number(teamResult.lastInsertRowid),
+    "team",
+    "open",
+    teamAnomalyDetected,
+    teamAnomalyAlerted,
+    null,
+    null,
+    2,
+    null,
+    null,
+  );
+
+  const budgetResult = anomalyStmt.run(
+    "team",
+    "threshold",
+    "warning",
+    "team_budget",
+    1310982,
+    1500000,
+    "Team spend $13,110 has reached the $15,000 budget threshold (87%).",
+    `${dateStr(0)} 10:00:00`,
+    null,
+    `${dateStr(0)} 10:00:05`,
+    null,
+    null,
+    null,
+  );
+  incidentStmt.run(
+    Number(budgetResult.lastInsertRowid),
+    "team",
+    "open",
+    `${dateStr(0)} 10:00:00`,
+    `${dateStr(0)} 10:00:05`,
+    null,
+    null,
+    1,
+    null,
+    null,
+  );
 
   db.close();
   console.log(`Mock database generated at ${DB_PATH}`);
@@ -706,7 +868,7 @@ function createSchema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS daily_spend (
       date TEXT NOT NULL, email TEXT NOT NULL, spend_cents INTEGER NOT NULL DEFAULT 0,
       cycle_start TEXT NOT NULL, collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, email, cycle_start)
+      PRIMARY KEY (date, email)
     );
     CREATE INDEX IF NOT EXISTS idx_daily_spend_email ON daily_spend(email);
     CREATE INDEX IF NOT EXISTS idx_daily_spend_date ON daily_spend(date);
@@ -755,6 +917,16 @@ function createSchema(db: Database.Database) {
       date TEXT NOT NULL, version TEXT NOT NULL, user_count INTEGER NOT NULL DEFAULT 0,
       percentage REAL NOT NULL DEFAULT 0, collected_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (date, version)
+    );
+    CREATE TABLE IF NOT EXISTS analytics_commands (
+      date TEXT NOT NULL, command_name TEXT NOT NULL, usage INTEGER NOT NULL DEFAULT 0,
+      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (date, command_name)
+    );
+    CREATE TABLE IF NOT EXISTS analytics_plans (
+      date TEXT NOT NULL, model TEXT NOT NULL, usage INTEGER NOT NULL DEFAULT 0,
+      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (date, model)
     );
     CREATE TABLE IF NOT EXISTS metadata (
       key TEXT PRIMARY KEY, value TEXT NOT NULL,
