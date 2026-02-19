@@ -1,11 +1,15 @@
 <p align="center">
-  <img src="public/logo.png" alt="Cursor Usage Tracker" width="100" height="100" />
+  <img src="public/logo.png" alt="Cursor Usage Tracker - open-source Cursor Enterprise cost monitoring dashboard with anomaly detection and Slack alerts" width="100" height="100" />
 </p>
 
 <h1 align="center">Cursor Usage Tracker</h1>
 
 <p align="center">
-  Know who's burning through your AI budget before the invoice tells you.
+  Know who's burning through your AI budget before the invoice tells you. Open-source Cursor Enterprise cost monitoring with anomaly detection, Slack alerts, and spend analytics.
+</p>
+
+<p align="center">
+  <a href="https://cursor-usage-tracker.sticklight.app">Website</a> · <a href="#quick-start">Quick Start</a> · <a href="#deploy">Deploy</a> · <a href="#features">Features</a>
 </p>
 
 <p align="center">
@@ -46,7 +50,7 @@ Your company has 50+ developers on Cursor. Do you know who's spending $200/day o
 
 You're about to find out.
 
-![Demo](assets/demo.gif)
+![Cursor Usage Tracker dashboard showing team spend, anomaly detection alerts, and per-user AI cost breakdown](assets/demo.gif)
 
 <sub>Demo animation created with <a href="https://github.com/ofershap/remotion-readme-kit">remotion-readme-kit</a></sub>
 
