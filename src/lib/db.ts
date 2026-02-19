@@ -1358,6 +1358,15 @@ export function getUserStats(email: string, days: number = 7) {
       email,
     ) as { spend_rank: number; activity_rank: number; total_ranked: number } | undefined;
 
+  const groupRow = db
+    .prepare(
+      `SELECT bg.id, bg.name FROM group_members gm
+       JOIN billing_groups bg ON bg.id = gm.group_id
+       WHERE gm.email = ? AND bg.name != 'Unassigned'
+       LIMIT 1`,
+    )
+    .get(email) as { id: string; name: string } | undefined;
+
   return {
     member,
     spending,
@@ -1375,6 +1384,7 @@ export function getUserStats(email: string, days: number = 7) {
           totalRanked: ranksRow.total_ranked,
         }
       : null,
+    group: groupRow ?? null,
   };
 }
 

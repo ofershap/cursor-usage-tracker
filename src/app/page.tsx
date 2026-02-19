@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { getFullDashboard } from "@/lib/db";
 import { DashboardClient } from "./dashboard-client";
 
@@ -6,7 +7,11 @@ export const dynamic = "force-dynamic";
 export default function HomePage() {
   try {
     const data = getFullDashboard(30);
-    return <DashboardClient initialData={data} />;
+    return (
+      <Suspense>
+        <DashboardClient initialData={data} />
+      </Suspense>
+    );
   } catch {
     return (
       <div className="text-center py-20">

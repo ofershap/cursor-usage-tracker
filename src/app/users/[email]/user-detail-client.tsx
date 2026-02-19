@@ -53,6 +53,7 @@ interface UserStats {
   mcpSummary: Array<{ tool_name: string; server_name: string; total_usage: number }>;
   commandsSummary: Array<{ command_name: string; total_usage: number }>;
   ranks: { spendRank: number; activityRank: number; totalRanked: number } | null;
+  group: { id: string; name: string } | null;
 }
 
 interface UserDetailClientProps {
@@ -98,6 +99,17 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
           <h1 className="text-lg font-bold">{stats.member?.name ?? email}</h1>
           <p className="text-zinc-500 text-xs">
             {email} · {stats.member?.role ?? "member"}
+            {stats.group && (
+              <>
+                {" · "}
+                <Link
+                  href={`/?group=${stats.group.id}`}
+                  className="text-blue-400 hover:text-blue-300"
+                >
+                  {stats.group.name}
+                </Link>
+              </>
+            )}
           </p>
         </div>
       </div>
@@ -127,6 +139,7 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
               ? `spend / #${stats.ranks.activityRank} activity (of ${stats.ranks.totalRanked})`
               : "No rank data"
           }
+          href={stats.group ? `/?group=${stats.group.id}` : "/"}
         />
       </div>
 
@@ -625,16 +638,16 @@ function KpiCard({
   value,
   sub,
   alert,
+  href,
 }: {
   label: string;
   value: string;
   sub?: string;
   alert?: boolean;
+  href?: string;
 }) {
-  return (
-    <div
-      className={`bg-zinc-900 border rounded-md px-3 py-2 min-w-0 flex-1 ${alert ? "border-red-500/50" : "border-zinc-800"}`}
-    >
+  const content = (
+    <>
       <div className="text-[10px] text-zinc-400 truncate">{label}</div>
       <div className="text-lg font-bold tracking-tight leading-tight text-zinc-100">{value}</div>
       {sub && (
@@ -642,6 +655,18 @@ function KpiCard({
           {sub}
         </div>
       )}
-    </div>
+    </>
   );
+
+  const className = `bg-zinc-900 border rounded-md px-3 py-2 min-w-0 flex-1 ${alert ? "border-red-500/50" : "border-zinc-800"} ${href ? "hover:border-zinc-600 transition-colors cursor-pointer" : ""}`;
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {content}
+      </Link>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
 }

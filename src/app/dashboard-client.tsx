@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import type { FullDashboard } from "@/lib/db";
 import { SpendBarChart } from "@/components/charts/spend-bar-chart";
 import { DailySpendChart } from "@/components/charts/daily-spend-chart";
@@ -58,6 +59,7 @@ interface DashboardClientProps {
 }
 
 export function DashboardClient({ initialData }: DashboardClientProps) {
+  const searchParams = useSearchParams();
   const [data, setData] = useState(initialData);
   const [days, setDays] = useState(() => {
     if (typeof window !== "undefined") {
@@ -74,10 +76,16 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   const [selectedGroup, setSelectedGroup] = useState("all");
 
   const savedDays = useRef(days);
+  const groupParam = searchParams.get("group");
   useEffect(() => {
     fetch("/api/groups")
       .then((r) => r.json())
-      .then((data: BillingGroupWithMembers[]) => setGroups(data))
+      .then((data: BillingGroupWithMembers[]) => {
+        setGroups(data);
+        if (groupParam && data.some((g: BillingGroupWithMembers) => g.id === groupParam)) {
+          setSelectedGroup(groupParam);
+        }
+      })
       .catch(() => {});
     if (savedDays.current !== 30) changeTimeRange(savedDays.current);
   }, []);
