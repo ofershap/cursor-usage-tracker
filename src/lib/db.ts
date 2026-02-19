@@ -4,11 +4,11 @@ import type {
   TeamMember,
   DailyUsage,
   MemberSpend,
-  UsageEvent,
   Anomaly,
   Incident,
   DetectionConfig,
   GroupMemberSpend,
+  FilteredUsageEvent,
   AnalyticsDAUEntry,
   AnalyticsModelUsageEntry,
   AnalyticsAgentEditsEntry,
@@ -16,6 +16,8 @@ import type {
   AnalyticsMCPEntry,
   AnalyticsFileExtensionsEntry,
   AnalyticsClientVersionsEntry,
+  AnalyticsCommandsEntry,
+  AnalyticsPlansEntry,
 } from "./types";
 import { DEFAULT_CONFIG } from "./types";
 
@@ -156,7 +158,7 @@ function initSchema(db: Database.Database): void {
       spend_cents INTEGER NOT NULL DEFAULT 0,
       cycle_start TEXT NOT NULL,
       collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, email, cycle_start)
+      PRIMARY KEY (date, email)
     );
 
     CREATE INDEX IF NOT EXISTS idx_daily_spend_email ON daily_spend(email);
@@ -242,6 +244,38 @@ function initSchema(db: Database.Database): void {
       percentage REAL NOT NULL DEFAULT 0,
       collected_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (date, version)
+    );
+
+    CREATE TABLE IF NOT EXISTS analytics_commands (
+      date TEXT NOT NULL,
+      command_name TEXT NOT NULL,
+      usage INTEGER NOT NULL DEFAULT 0,
+      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (date, command_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS analytics_plans (
+      date TEXT NOT NULL,
+      model TEXT NOT NULL,
+      usage INTEGER NOT NULL DEFAULT 0,
+      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (date, model)
+    );
+
+    CREATE TABLE IF NOT EXISTS analytics_commands (
+      date TEXT NOT NULL,
+      command_name TEXT NOT NULL,
+      usage INTEGER NOT NULL DEFAULT 0,
+      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (date, command_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS analytics_plans (
+      date TEXT NOT NULL,
+      model TEXT NOT NULL,
+      usage INTEGER NOT NULL DEFAULT 0,
+      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (date, model)
     );
 
     CREATE TABLE IF NOT EXISTS metadata (
@@ -394,56 +428,14 @@ export function upsertSpending(members: MemberSpend[], cycleStart: string): void
   tx();
 }
 
-export function insertUsageEvents(events: UsageEvent[]): number {
-  const db = getDb();
-
-  const lastTs = db.prepare("SELECT MAX(timestamp) as ts FROM usage_events").get() as
-    | { ts: string | null }
-    | undefined;
-  const cutoff = lastTs?.ts ?? "1970-01-01T00:00:00.000Z";
-
-  const stmt = db.prepare(`
-    INSERT INTO usage_events (user_email, timestamp, model, kind, max_mode, requests_cost_cents,
-      total_cents, total_tokens, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-      is_chargeable, is_headless)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  let inserted = 0;
-  const tx = db.transaction(() => {
-    for (const e of events) {
-      const ts = e.timestamp.toISOString();
-      if (ts <= cutoff) continue;
-      stmt.run(
-        e.userEmail,
-        ts,
-        e.model,
-        e.kind,
-        e.maxMode ? 1 : 0,
-        e.requestsCostCents,
-        e.totalCents,
-        e.totalTokens,
-        e.inputTokens,
-        e.outputTokens,
-        e.cacheReadTokens,
-        e.cacheWriteTokens,
-        e.isChargeable ? 1 : 0,
-        e.isHeadless ? 1 : 0,
-      );
-      inserted++;
-    }
-  });
-  tx();
-  return inserted;
-}
-
 export function upsertDailySpend(members: GroupMemberSpend[], cycleStart: string): void {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO daily_spend (date, email, spend_cents, cycle_start)
     VALUES (?, ?, ?, ?)
-    ON CONFLICT(date, email, cycle_start) DO UPDATE SET
+    ON CONFLICT(date, email) DO UPDATE SET
       spend_cents = excluded.spend_cents,
+      cycle_start = excluded.cycle_start,
       collected_at = datetime('now')
   `);
 
@@ -495,11 +487,31 @@ export function upsertBillingGroups(
 
 export function getUserDailySpend(email: string): Array<{ date: string; spend_cents: number }> {
   const db = getDb();
-  return db
+
+  const cycleRow = db
+    .prepare("SELECT MIN(cycle_start) as cycle_start FROM daily_spend WHERE email = ?")
+    .get(email) as { cycle_start: string } | undefined;
+
+  const spendRows = db
     .prepare(
       "SELECT date, MAX(spend_cents) as spend_cents FROM daily_spend WHERE email = ? GROUP BY date ORDER BY date",
     )
     .all(email) as Array<{ date: string; spend_cents: number }>;
+
+  if (!cycleRow?.cycle_start || !spendRows.length) return spendRows;
+
+  const spendMap = new Map(spendRows.map((r) => [r.date, r.spend_cents]));
+  const firstSpendDate = spendRows[0].date;
+  const start = new Date(firstSpendDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const result: Array<{ date: string; spend_cents: number }> = [];
+  for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().slice(0, 10);
+    result.push({ date: dateStr, spend_cents: spendMap.get(dateStr) ?? 0 });
+  }
+  return result;
 }
 
 export function getUserActivityProfile(email: string, days: number = 30) {
@@ -768,6 +780,15 @@ export function logCollection(type: string, count: number, error?: string): void
   ).run(type, count, error ?? null);
 }
 
+export type UsageBadge =
+  | "power-user"
+  | "deep-thinker"
+  | "balanced"
+  | "tab-completer"
+  | "light-user";
+
+export type SpendBadge = "cost-efficient" | "premium-model" | "over-budget";
+
 export interface RankedUser {
   rank: number;
   email: string;
@@ -780,6 +801,11 @@ export interface RankedUser {
   most_used_model: string;
   spend_rank: number;
   activity_rank: number;
+  active_days: number;
+  tabs_accepted: number;
+  tabs_shown: number;
+  usage_badge: UsageBadge | null;
+  spend_badge: SpendBadge | null;
 }
 
 export interface DashboardStats {
@@ -897,6 +923,9 @@ export function getFullDashboard(days: number = 7): FullDashboard {
         SELECT email,
           SUM(agent_requests) as agent_requests,
           SUM(lines_added) as lines_added,
+          SUM(tabs_accepted) as tabs_accepted,
+          SUM(total_tabs_shown) as tabs_shown,
+          COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days,
           MAX(most_used_model) as most_used_model
         FROM daily_usage
         WHERE date >= date('now', ?) AND is_active = 1
@@ -909,6 +938,9 @@ export function getFullDashboard(days: number = 7): FullDashboard {
         COALESCE(a.agent_requests, 0) as agent_requests,
         COALESCE(a.lines_added, 0) as lines_added,
         COALESCE(a.most_used_model, '') as most_used_model,
+        COALESCE(a.active_days, 0) as active_days,
+        COALESCE(a.tabs_accepted, 0) as tabs_accepted,
+        COALESCE(a.tabs_shown, 0) as tabs_shown,
         RANK() OVER (ORDER BY COALESCE(us.spend_cents, 0) DESC) as spend_rank,
         RANK() OVER (ORDER BY COALESCE(a.agent_requests, 0) DESC) as activity_rank
       FROM members m
@@ -926,6 +958,9 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     agent_requests: number;
     lines_added: number;
     most_used_model: string;
+    active_days: number;
+    tabs_accepted: number;
+    tabs_shown: number;
     spend_rank: number;
     activity_rank: number;
   }>;
@@ -1019,10 +1054,93 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     cycleEnd,
     cycleDays,
     dailyTeamActivity,
-    rankedUsers: rankedUsers.map((u, i) => ({ ...u, rank: i + 1 })),
+    rankedUsers: assignBadges(rankedUsers).map((u, i) => ({ ...u, rank: i + 1 })),
   };
 
   return { days, stats, modelCosts, teamDailySpend, dailySpendBreakdown };
+}
+
+function isMaxModel(model: string): boolean {
+  return model.toLowerCase().includes("-max");
+}
+
+function assignBadges(
+  users: Array<{
+    email: string;
+    name: string;
+    spend_cents: number;
+    included_spend_cents: number;
+    fast_premium_requests: number;
+    agent_requests: number;
+    lines_added: number;
+    most_used_model: string;
+    active_days: number;
+    tabs_accepted: number;
+    tabs_shown: number;
+    spend_rank: number;
+    activity_rank: number;
+  }>,
+): Array<
+  (typeof users)[number] & {
+    usage_badge: UsageBadge | null;
+    spend_badge: SpendBadge | null;
+  }
+> {
+  const activeUsers = users.filter((u) => u.agent_requests >= 30);
+  const reqValues = activeUsers.map((u) => u.agent_requests).sort((a, b) => a - b);
+
+  const p80Reqs = reqValues[Math.floor(reqValues.length * 0.8)] ?? 0;
+  const spendingUsers = activeUsers.filter((u) => u.spend_cents > 0);
+  const medianSpend =
+    spendingUsers.length > 0
+      ? (spendingUsers.map((u) => u.spend_cents).sort((a, b) => a - b)[
+          Math.floor(spendingUsers.length * 0.5)
+        ] ?? 0)
+      : 0;
+  const spendingCprs = spendingUsers
+    .filter((u) => u.agent_requests > 0)
+    .map((u) => u.spend_cents / u.agent_requests)
+    .sort((a, b) => a - b);
+  const medianCpr =
+    spendingCprs.length > 0 ? (spendingCprs[Math.floor(spendingCprs.length * 0.5)] ?? 0) : 0;
+
+  return users.map((u) => {
+    let usage_badge: UsageBadge | null = null;
+    let spend_badge: SpendBadge | null = null;
+
+    if (u.agent_requests < 10) {
+      usage_badge = "light-user";
+    } else {
+      const reqsPerDay = u.active_days > 0 ? u.agent_requests / u.active_days : 0;
+      const tabRatio = u.agent_requests > 0 ? u.tabs_accepted / u.agent_requests : 0;
+      const usesMax = isMaxModel(u.most_used_model);
+
+      if (tabRatio > 1.5) {
+        usage_badge = "tab-completer";
+      } else if (usesMax) {
+        usage_badge = "deep-thinker";
+      } else if (reqsPerDay >= 80) {
+        usage_badge = "power-user";
+      } else {
+        usage_badge = "balanced";
+      }
+    }
+
+    if (u.agent_requests >= 30 && u.spend_cents > 0) {
+      const cpr = u.spend_cents / u.agent_requests;
+      const overBudget = u.spend_cents > medianSpend * 5 && u.spend_cents > 10000;
+
+      if (overBudget) {
+        spend_badge = "over-budget";
+      } else if (isMaxModel(u.most_used_model) && medianCpr > 0 && cpr > medianCpr * 3) {
+        spend_badge = "premium-model";
+      } else if (u.agent_requests >= p80Reqs && medianCpr > 0 && cpr <= medianCpr * 0.5) {
+        spend_badge = "cost-efficient";
+      }
+    }
+
+    return { ...u, usage_badge, spend_badge };
+  });
 }
 
 export function getDashboardStats(days: number = 7): DashboardStats {
@@ -1085,7 +1203,7 @@ export function getUserStats(email: string, days: number = 7) {
     .all(email) as Anomaly[];
 
   const dailySpend = getUserDailySpend(email);
-  const activityProfile = getUserActivityProfile(email, days);
+  const usageEventsSummary = getUserUsageEventsSummary(email, days);
 
   return {
     member,
@@ -1094,7 +1212,7 @@ export function getUserStats(email: string, days: number = 7) {
     modelBreakdown,
     anomalies,
     dailySpend,
-    activityProfile,
+    usageEventsSummary,
   };
 }
 
@@ -1557,4 +1675,224 @@ export function getAllMembers(): Array<TeamMember & { first_seen: string; last_s
   return db.prepare("SELECT * FROM members ORDER BY name").all() as Array<
     TeamMember & { first_seen: string; last_seen: string }
   >;
+}
+
+export function upsertUsageEvents(events: FilteredUsageEvent[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO usage_events (user_email, timestamp, model, kind, max_mode, requests_cost_cents,
+      total_cents, total_tokens, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+      is_chargeable, is_headless)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const tx = db.transaction(() => {
+    for (const e of events) {
+      const tu = e.tokenUsage;
+      stmt.run(
+        e.userEmail,
+        e.timestamp,
+        e.model,
+        e.kind,
+        e.maxMode ? 1 : 0,
+        e.requestsCosts,
+        tu?.totalCents ?? 0,
+        (tu?.inputTokens ?? 0) + (tu?.outputTokens ?? 0),
+        tu?.inputTokens ?? 0,
+        tu?.outputTokens ?? 0,
+        tu?.cacheReadTokens ?? 0,
+        tu?.cacheWriteTokens ?? 0,
+        e.isChargeable ? 1 : 0,
+        e.isHeadless ? 1 : 0,
+      );
+    }
+  });
+  tx();
+}
+
+export function getUserUsageEventsSummary(
+  email: string,
+  days: number = 30,
+): Array<{
+  model: string;
+  requests: number;
+  total_cost_cents: number;
+  avg_cost_cents: number;
+  plan_reqs: number;
+  plan_cost_cents: number;
+  overage_reqs: number;
+  overage_cost_cents: number;
+  error_reqs: number;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+    SELECT model,
+      COUNT(*) as requests,
+      SUM(total_cents) as total_cost_cents,
+      ROUND(AVG(total_cents), 2) as avg_cost_cents,
+      SUM(CASE WHEN kind LIKE 'Included%' THEN 1 ELSE 0 END) as plan_reqs,
+      SUM(CASE WHEN kind LIKE 'Included%' THEN total_cents ELSE 0 END) as plan_cost_cents,
+      SUM(CASE WHEN kind = 'Usage-based' THEN 1 ELSE 0 END) as overage_reqs,
+      SUM(CASE WHEN kind = 'Usage-based' THEN total_cents ELSE 0 END) as overage_cost_cents,
+      SUM(CASE WHEN kind LIKE 'Errored%' THEN 1 ELSE 0 END) as error_reqs
+    FROM usage_events
+    WHERE user_email = ? AND CAST(timestamp AS INTEGER) >= ?
+    GROUP BY model
+    HAVING SUM(total_cents) > 0 OR COUNT(*) >= 5
+    ORDER BY total_cost_cents DESC
+  `,
+    )
+    .all(email, Date.now() - days * 24 * 60 * 60 * 1000) as Array<{
+    model: string;
+    requests: number;
+    total_cost_cents: number;
+    avg_cost_cents: number;
+    plan_reqs: number;
+    plan_cost_cents: number;
+    overage_reqs: number;
+    overage_cost_cents: number;
+    error_reqs: number;
+  }>;
+}
+
+export function getUsageEventsLastTimestamp(): string | null {
+  const db = getDb();
+  const row = db.prepare("SELECT MAX(timestamp) as ts FROM usage_events").get() as {
+    ts: string | null;
+  };
+  return row?.ts ?? null;
+}
+
+export function upsertAnalyticsCommands(entries: AnalyticsCommandsEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_commands (date, command_name, usage)
+    VALUES (?, ?, ?)
+    ON CONFLICT(date, command_name) DO UPDATE SET
+      usage = excluded.usage, collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) stmt.run(e.event_date, e.command_name, e.usage);
+  });
+  tx();
+}
+
+export function getAnalyticsCommandsSummary(
+  days: number = 30,
+): Array<{ command_name: string; total_usage: number }> {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+    SELECT command_name, SUM(usage) as total_usage
+    FROM analytics_commands WHERE date >= date('now', ?)
+    GROUP BY command_name ORDER BY total_usage DESC
+  `,
+    )
+    .all(`-${days} days`) as Array<{ command_name: string; total_usage: number }>;
+}
+
+export function upsertAnalyticsPlans(entries: AnalyticsPlansEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_plans (date, model, usage)
+    VALUES (?, ?, ?)
+    ON CONFLICT(date, model) DO UPDATE SET
+      usage = excluded.usage, collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) stmt.run(e.event_date, e.model, e.usage);
+  });
+  tx();
+}
+
+export function getAnalyticsPlansSummary(
+  days: number = 30,
+): Array<{ model: string; total_usage: number }> {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+    SELECT model, SUM(usage) as total_usage
+    FROM analytics_plans WHERE date >= date('now', ?)
+    GROUP BY model ORDER BY total_usage DESC
+  `,
+    )
+    .all(`-${days} days`) as Array<{ model: string; total_usage: number }>;
+}
+
+export function getPlanExhaustionStats(): {
+  summary: {
+    users_exhausted: number;
+    total_active: number;
+    avg_days: number;
+    median_days: number;
+    pct_exhausted: number;
+  };
+  users: Array<{
+    email: string;
+    name: string;
+    days_to_exhaust: number;
+    usage_based_reqs: number;
+  }>;
+} {
+  const db = getDb();
+  const cycleRow = db.prepare("SELECT MAX(cycle_start) as cs FROM spending").get() as {
+    cs: string | null;
+  };
+  const cycleStart = cycleRow?.cs;
+  if (!cycleStart)
+    return {
+      summary: {
+        users_exhausted: 0,
+        total_active: 0,
+        avg_days: 0,
+        median_days: 0,
+        pct_exhausted: 0,
+      },
+      users: [],
+    };
+
+  const users = db
+    .prepare(
+      `SELECT du.email, m.name,
+         CAST(julianday(MIN(du.date)) - julianday(?) + 1 AS INT) as days_to_exhaust,
+         SUM(du.usage_based_reqs) as usage_based_reqs
+       FROM daily_usage du
+       LEFT JOIN members m ON du.email = m.email
+       WHERE du.date >= ? AND du.usage_based_reqs > 0
+       GROUP BY du.email
+       ORDER BY days_to_exhaust ASC`,
+    )
+    .all(cycleStart, cycleStart) as Array<{
+    email: string;
+    name: string;
+    days_to_exhaust: number;
+    usage_based_reqs: number;
+  }>;
+
+  const totalActive = (
+    db
+      .prepare(
+        "SELECT COUNT(DISTINCT email) as total FROM daily_usage WHERE date >= ? AND agent_requests > 0",
+      )
+      .get(cycleStart) as { total: number }
+  ).total;
+
+  const days = users.map((u) => u.days_to_exhaust).sort((a, b) => a - b);
+  const median = days.length > 0 ? (days[Math.floor(days.length / 2)] ?? 0) : 0;
+  const avg =
+    days.length > 0 ? Math.round((days.reduce((s, d) => s + d, 0) / days.length) * 10) / 10 : 0;
+
+  return {
+    summary: {
+      users_exhausted: users.length,
+      total_active: totalActive,
+      avg_days: avg,
+      median_days: median,
+      pct_exhausted: totalActive > 0 ? Math.round((users.length / totalActive) * 100) : 0,
+    },
+    users,
+  };
 }

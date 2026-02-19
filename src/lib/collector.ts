@@ -1,10 +1,13 @@
 import { getCursorClient } from "./cursor-client";
+import type { FilteredUsageEvent } from "./types";
 import {
   upsertMembers,
   upsertDailyUsage,
   upsertSpending,
   upsertDailySpend,
   upsertBillingGroups,
+  upsertUsageEvents,
+  getUsageEventsLastTimestamp,
   upsertAnalyticsDAU,
   upsertAnalyticsModelUsage,
   upsertAnalyticsAgentEdits,
@@ -12,6 +15,8 @@ import {
   upsertAnalyticsMCP,
   upsertAnalyticsFileExtensions,
   upsertAnalyticsClientVersions,
+  upsertAnalyticsCommands,
+  upsertAnalyticsPlans,
   logCollection,
   setMetadata,
 } from "./db";
@@ -22,6 +27,7 @@ export interface CollectionResult {
   spending: number;
   dailySpend: number;
   groups: number;
+  usageEvents: number;
   analytics: number;
   errors: string[];
 }
@@ -34,6 +40,7 @@ export async function collectAll(): Promise<CollectionResult> {
     spending: 0,
     dailySpend: 0,
     groups: 0,
+    usageEvents: 0,
     analytics: 0,
     errors: [],
   };
@@ -41,14 +48,17 @@ export async function collectAll(): Promise<CollectionResult> {
   console.log("[collect] Fetching team members...");
   await collectMembers(client, result);
 
-  console.log("[collect] Fetching daily usage data...");
-  await collectDailyUsage(client, result);
-
   console.log("[collect] Fetching spending data...");
-  await collectSpending(client, result);
+  const cycleStart = await collectSpending(client, result);
+
+  console.log("[collect] Fetching daily usage data...");
+  await collectDailyUsage(client, result, cycleStart);
 
   console.log("[collect] Fetching billing groups + daily spend...");
   await collectGroups(client, result);
+
+  console.log("[collect] Fetching usage events...");
+  await collectUsageEvents(client, result, cycleStart);
 
   console.log("[collect] Fetching analytics data...");
   await collectAnalytics(client, result);
@@ -77,9 +87,11 @@ async function collectMembers(
 async function collectDailyUsage(
   client: ReturnType<typeof getCursorClient>,
   result: CollectionResult,
+  cycleStart?: string,
 ): Promise<void> {
   try {
-    const usage = await client.getDailyUsage({ pageSize: 100 });
+    const startDate = cycleStart ? new Date(cycleStart).getTime() : undefined;
+    const usage = await client.getDailyUsage({ pageSize: 100, startDate });
     upsertDailyUsage(usage);
     result.dailyUsage = usage.length;
     console.log(`[collect] Daily usage entries: ${usage.length}`);
@@ -95,18 +107,30 @@ async function collectDailyUsage(
 async function collectSpending(
   client: ReturnType<typeof getCursorClient>,
   result: CollectionResult,
-): Promise<void> {
+): Promise<string | undefined> {
   try {
-    const { members, cycleStart } = await client.getSpending();
+    const { members, cycleStart, limitedUsersCount } = await client.getSpending();
     upsertSpending(members, cycleStart);
     result.spending = members.length;
-    console.log(`[collect] Spending: ${members.length} members (cycle: ${cycleStart})`);
+
+    setMetadata("limited_users_count", String(limitedUsersCount));
+    if (limitedUsersCount > 0) {
+      console.log(
+        `[collect] WARNING: ${limitedUsersCount} users are limited (unable to make requests)`,
+      );
+    }
+
+    console.log(
+      `[collect] Spending: ${members.length} members (cycle: ${cycleStart}, limited: ${limitedUsersCount})`,
+    );
     logCollection("spending", members.length);
+    return cycleStart;
   } catch (error) {
     const msg = `Failed to collect spending: ${error instanceof Error ? error.message : String(error)}`;
     result.errors.push(msg);
     console.error(`[collect] ${msg}`);
     logCollection("spending", 0, msg);
+    return undefined;
   }
 }
 
@@ -154,6 +178,54 @@ async function collectGroups(
     result.errors.push(msg);
     console.error(`[collect] ${msg}`);
     logCollection("groups", 0, msg);
+  }
+}
+
+async function collectUsageEvents(
+  client: ReturnType<typeof getCursorClient>,
+  result: CollectionResult,
+  cycleStart?: string,
+): Promise<void> {
+  try {
+    const lastTs = getUsageEventsLastTimestamp();
+    const fallbackMs = cycleStart
+      ? new Date(cycleStart).getTime()
+      : Date.now() - 24 * 60 * 60 * 1000;
+    const startDate = lastTs ? Number(lastTs) : fallbackMs;
+
+    let page = 1;
+    let totalCollected = 0;
+    const allEvents: FilteredUsageEvent[] = [];
+
+    while (true) {
+      const data = await client.getFilteredUsageEvents({
+        startDate,
+        page,
+        pageSize: 500,
+      });
+
+      allEvents.push(...data.usageEvents);
+      totalCollected += data.usageEvents.length;
+      console.log(
+        `[collect] Usage events page ${page}/${data.pagination.numPages} (${totalCollected} events)`,
+      );
+
+      if (!data.pagination.hasNextPage) break;
+      page++;
+    }
+
+    if (allEvents.length > 0) {
+      upsertUsageEvents(allEvents);
+    }
+
+    result.usageEvents = totalCollected;
+    console.log(`[collect] Usage events: ${totalCollected}`);
+    logCollection("usage_events", totalCollected);
+  } catch (error) {
+    const msg = `Failed to collect usage events: ${error instanceof Error ? error.message : String(error)}`;
+    result.errors.push(msg);
+    console.error(`[collect] ${msg}`);
+    logCollection("usage_events", 0, msg);
   }
 }
 
@@ -218,6 +290,22 @@ async function collectAnalytics(
       fn: async () => {
         const data = await client.getAnalyticsClientVersions(opts);
         upsertAnalyticsClientVersions(data.data);
+        return data.data.length;
+      },
+    },
+    {
+      name: "commands",
+      fn: async () => {
+        const data = await client.getAnalyticsCommands(opts);
+        upsertAnalyticsCommands(data.data);
+        return data.data.length;
+      },
+    },
+    {
+      name: "plans",
+      fn: async () => {
+        const data = await client.getAnalyticsPlans(opts);
+        upsertAnalyticsPlans(data.data);
         return data.data.length;
       },
     },

@@ -25,15 +25,34 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
   const [config, setConfig] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [budgetThreshold, setBudgetThreshold] = useState(0);
+  const [budgetLoaded, setBudgetLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings/budget")
+      .then((r) => r.json())
+      .then((data: { value: number }) => {
+        setBudgetThreshold(data.value ?? 0);
+        setBudgetLoaded(true);
+      })
+      .catch(() => setBudgetLoaded(true));
+  }, []);
 
   async function handleSave() {
     setSaving(true);
     setSaved(false);
-    await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config),
-    });
+    await Promise.all([
+      fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      }),
+      fetch("/api/settings/budget", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: budgetThreshold }),
+      }),
+    ]);
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
@@ -44,7 +63,7 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold">Detection Settings</h1>
-          <p className="text-[11px] text-zinc-500">
+          <p className="text-[11px] text-zinc-400">
             Configure anomaly detection thresholds and alerting behavior
           </p>
         </div>
@@ -90,23 +109,6 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
             }
             hint={config.thresholds.maxRequestsPerDay === 0 ? "disabled" : undefined}
             unit="reqs"
-          />
-          <Field
-            label="Max tokens / day"
-            value={config.thresholds.maxTokensPerDay}
-            onChange={(v) =>
-              setConfig({
-                ...config,
-                thresholds: { ...config.thresholds, maxTokensPerDay: v },
-              })
-            }
-            suffix={
-              config.thresholds.maxTokensPerDay > 0
-                ? `${(config.thresholds.maxTokensPerDay / 1_000_000).toFixed(1)}M`
-                : undefined
-            }
-            hint={config.thresholds.maxTokensPerDay === 0 ? "disabled" : undefined}
-            unit="tokens"
           />
         </Section>
 
@@ -179,11 +181,40 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
             <p>Rate limits: Admin 20 req/min · Analytics 100 req/min</p>
           </div>
         </Section>
+
+        <Section
+          title="Team Budget Alert"
+          description="Get notified when total team spend reaches this amount. Set to 0 to disable."
+        >
+          {budgetLoaded && (
+            <Field
+              label="Budget threshold"
+              value={budgetThreshold}
+              onChange={(v) => setBudgetThreshold(v)}
+              unit="$"
+              suffix={
+                budgetThreshold > 0 ? `alert at $${budgetThreshold.toLocaleString()}` : "disabled"
+              }
+            />
+          )}
+        </Section>
       </div>
 
       <BillingGroupsManager />
     </div>
   );
+}
+
+interface RestorePreview {
+  totalRows: number;
+  changes: Array<{
+    email: string;
+    name: string;
+    currentGroup: string;
+    newGroup: string;
+  }>;
+  unchanged: number;
+  applied?: number;
 }
 
 interface ImportPreview {
@@ -223,6 +254,14 @@ function BillingGroupsManager() {
   const [dragOver, setDragOver] = useState(false);
   const [csvText, setCsvText] = useState("");
   const [selectedChanges, setSelectedChanges] = useState<Set<string>>(new Set());
+  const [showBackup, setShowBackup] = useState(false);
+  const [backupTab, setBackupTab] = useState<"export" | "import">("export");
+  const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
+  const [restoreStep, setRestoreStep] = useState<"upload" | "preview" | "done">("upload");
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const restoreFileRef = useRef<HTMLInputElement>(null);
+  const [restoreDragOver, setRestoreDragOver] = useState(false);
+  const [restoreCsvText, setRestoreCsvText] = useState("");
 
   const loadGroups = useCallback(() => {
     fetch("/api/groups")
@@ -287,6 +326,55 @@ function BillingGroupsManager() {
     setCsvText("");
     setSelectedChanges(new Set());
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleRestoreFile(file: File) {
+    const text = await file.text();
+    setRestoreCsvText(text);
+    setRestoreBusy(true);
+    try {
+      const res = await fetch("/api/groups/backup-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv: text }),
+      });
+      const preview: RestorePreview = await res.json();
+      if ("error" in preview) {
+        alert((preview as unknown as { error: string }).error);
+        return;
+      }
+      setRestorePreview(preview);
+      setRestoreStep("preview");
+    } finally {
+      setRestoreBusy(false);
+    }
+  }
+
+  async function handleApplyRestore() {
+    if (!restorePreview || !restoreCsvText) return;
+    setRestoreBusy(true);
+    try {
+      const res = await fetch("/api/groups/backup-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv: restoreCsvText, apply: true }),
+      });
+      const result: RestorePreview = await res.json();
+      setRestorePreview(result);
+      setRestoreStep("done");
+      loadGroups();
+    } finally {
+      setRestoreBusy(false);
+    }
+  }
+
+  function closeBackup() {
+    setShowBackup(false);
+    setBackupTab("export");
+    setRestorePreview(null);
+    setRestoreStep("upload");
+    setRestoreCsvText("");
+    if (restoreFileRef.current) restoreFileRef.current.value = "";
   }
 
   const unassigned = groups.find((g) => g.name === "Unassigned");
@@ -364,6 +452,12 @@ function BillingGroupsManager() {
             {namedGroups.length} groups · {unassigned?.member_count ?? 0} unassigned
           </span>
           <button
+            onClick={() => setShowBackup(true)}
+            className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded-md text-[11px] font-medium transition-colors"
+          >
+            Import / Export
+          </button>
+          <button
             onClick={() => setShowImport(true)}
             className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[11px] font-medium transition-colors"
           >
@@ -374,7 +468,7 @@ function BillingGroupsManager() {
 
       {namedGroups.length > 0 && (
         <div>
-          <div className="text-[10px] text-zinc-500 mb-1.5 font-medium uppercase tracking-wider">
+          <div className="text-[10px] text-zinc-400 mb-1.5 font-medium uppercase tracking-wider">
             Groups ({namedGroups.length})
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -455,7 +549,7 @@ function BillingGroupsManager() {
                     setShowNewGroup(false);
                     setNewGroupName("");
                   }}
-                  className="text-[10px] text-zinc-500 hover:text-zinc-300"
+                  className="text-[10px] text-zinc-400 hover:text-zinc-300"
                 >
                   cancel
                 </button>
@@ -463,7 +557,7 @@ function BillingGroupsManager() {
             ) : (
               <button
                 onClick={() => setShowNewGroup(true)}
-                className="flex items-center gap-0.5 border border-dashed border-zinc-600 rounded px-2 py-0.5 text-[10px] text-zinc-500 hover:text-zinc-300 hover:border-zinc-500 transition-colors"
+                className="flex items-center gap-0.5 border border-dashed border-zinc-600 rounded px-2 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-300 hover:border-zinc-500 transition-colors"
               >
                 + New group
               </button>
@@ -473,7 +567,7 @@ function BillingGroupsManager() {
       )}
 
       <div>
-        <div className="text-[10px] text-zinc-500 mb-1.5 font-medium uppercase tracking-wider">
+        <div className="text-[10px] text-zinc-400 mb-1.5 font-medium uppercase tracking-wider">
           Members
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -499,7 +593,7 @@ function BillingGroupsManager() {
               className="bg-zinc-800 border border-zinc-700 rounded-md px-2 py-1 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50 w-56"
             />
             {isSearching && (
-              <span className="text-[10px] text-zinc-500">
+              <span className="text-[10px] text-zinc-400">
                 {filteredMembers.length} result{filteredMembers.length !== 1 ? "s" : ""}
               </span>
             )}
@@ -651,7 +745,7 @@ function BillingGroupsManager() {
                         if (file) handleCsvFile(file);
                       }}
                     />
-                    <div className="text-zinc-500 text-sm">
+                    <div className="text-zinc-400 text-sm">
                       {importBusy ? (
                         <span className="animate-pulse">Analyzing CSV...</span>
                       ) : (
@@ -677,19 +771,19 @@ function BillingGroupsManager() {
                   <div className="grid grid-cols-4 gap-2 text-center">
                     <div className="bg-zinc-800 rounded p-2">
                       <div className="text-lg font-bold">{importPreview.matched}</div>
-                      <div className="text-[10px] text-zinc-500">Matched</div>
+                      <div className="text-[10px] text-zinc-400">Matched</div>
                     </div>
                     <div className="bg-zinc-800 rounded p-2">
                       <div className="text-lg font-bold text-amber-400">{importPreview.moves}</div>
-                      <div className="text-[10px] text-zinc-500">Will move</div>
+                      <div className="text-[10px] text-zinc-400">Will move</div>
                     </div>
                     <div className="bg-zinc-800 rounded p-2">
                       <div className="text-lg font-bold text-green-400">{importPreview.keeps}</div>
-                      <div className="text-[10px] text-zinc-500">Stay</div>
+                      <div className="text-[10px] text-zinc-400">Stay</div>
                     </div>
                     <div className="bg-zinc-800 rounded p-2">
                       <div className="text-lg font-bold text-zinc-500">{importPreview.noMatch}</div>
-                      <div className="text-[10px] text-zinc-500">No match</div>
+                      <div className="text-[10px] text-zinc-400">No match</div>
                     </div>
                   </div>
 
@@ -802,7 +896,7 @@ function BillingGroupsManager() {
                   )}
 
                   {importPreview.moves === 0 && (
-                    <div className="text-center py-4 text-zinc-500 text-sm">
+                    <div className="text-center py-4 text-zinc-400 text-sm">
                       Everything is up to date - no changes needed.
                     </div>
                   )}
@@ -820,7 +914,7 @@ function BillingGroupsManager() {
                   <div className="text-sm text-zinc-200">
                     Applied {importPreview.applied ?? 0} changes
                   </div>
-                  <div className="text-xs text-zinc-500">
+                  <div className="text-xs text-zinc-400">
                     Groups have been updated in the local database.
                   </div>
                 </div>
@@ -867,6 +961,238 @@ function BillingGroupsManager() {
                   className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200"
                 >
                   Cancel
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBackup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+              <div className="flex items-center gap-3">
+                <h3 className="text-sm font-medium text-zinc-200">Import / Export</h3>
+                <div className="flex bg-zinc-800 rounded-md p-0.5">
+                  <button
+                    onClick={() => setBackupTab("export")}
+                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                      backupTab === "export"
+                        ? "bg-zinc-700 text-zinc-100"
+                        : "text-zinc-500 hover:text-zinc-300"
+                    }`}
+                  >
+                    Export
+                  </button>
+                  <button
+                    onClick={() => setBackupTab("import")}
+                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                      backupTab === "import"
+                        ? "bg-zinc-700 text-zinc-100"
+                        : "text-zinc-500 hover:text-zinc-300"
+                    }`}
+                  >
+                    Import
+                  </button>
+                </div>
+              </div>
+              <button
+                onClick={closeBackup}
+                className="text-zinc-500 hover:text-zinc-300 text-lg leading-none"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1">
+              {backupTab === "export" && (
+                <div className="space-y-4">
+                  <div className="text-xs text-zinc-400 space-y-1">
+                    <p>Download the current user-to-group mapping as a CSV file.</p>
+                    <p className="text-[10px] text-zinc-600">
+                      Use this as a backup before making bulk changes, or to transfer mappings
+                      between environments.
+                    </p>
+                  </div>
+                  <div className="bg-zinc-800 rounded-lg p-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-zinc-300">
+                        {groups.reduce((sum, g) => sum + g.members.length, 0)} members across{" "}
+                        {groups.filter((g) => g.name !== "Unassigned").length} groups
+                      </div>
+                      <div className="text-[10px] text-zinc-600 mt-0.5">
+                        Format: email, name, group
+                      </div>
+                    </div>
+                    <a
+                      href="/api/groups/export"
+                      download
+                      className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-xs font-medium transition-colors"
+                    >
+                      Download CSV
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {backupTab === "import" && restoreStep === "upload" && (
+                <div className="space-y-3">
+                  <div className="text-xs text-zinc-400 space-y-1">
+                    <p>Restore a previously exported group mapping CSV.</p>
+                    <p className="text-[10px] text-zinc-600">
+                      Expected columns: <span className="font-mono text-zinc-400">email</span>,{" "}
+                      <span className="font-mono text-zinc-400">name</span>,{" "}
+                      <span className="font-mono text-zinc-400">group</span>
+                    </p>
+                  </div>
+
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setRestoreDragOver(true);
+                    }}
+                    onDragLeave={() => setRestoreDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setRestoreDragOver(false);
+                      const file = e.dataTransfer.files[0];
+                      if (file) handleRestoreFile(file);
+                    }}
+                    onClick={() => restoreFileRef.current?.click()}
+                    className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                      restoreDragOver
+                        ? "border-blue-500 bg-blue-500/10"
+                        : "border-zinc-700 hover:border-zinc-500"
+                    }`}
+                  >
+                    <input
+                      ref={restoreFileRef}
+                      type="file"
+                      accept=".csv"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleRestoreFile(file);
+                      }}
+                    />
+                    <div className="text-zinc-400 text-sm">
+                      {restoreBusy ? (
+                        <span className="animate-pulse">Analyzing CSV...</span>
+                      ) : (
+                        <p>Drop exported CSV here or click to browse</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {backupTab === "import" && restoreStep === "preview" && restorePreview && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-zinc-800 rounded p-2">
+                      <div className="text-lg font-bold">{restorePreview.totalRows}</div>
+                      <div className="text-[10px] text-zinc-400">Total rows</div>
+                    </div>
+                    <div className="bg-zinc-800 rounded p-2">
+                      <div className="text-lg font-bold text-amber-400">
+                        {restorePreview.changes.length}
+                      </div>
+                      <div className="text-[10px] text-zinc-400">Changes</div>
+                    </div>
+                    <div className="bg-zinc-800 rounded p-2">
+                      <div className="text-lg font-bold text-green-400">
+                        {restorePreview.unchanged}
+                      </div>
+                      <div className="text-[10px] text-zinc-400">Unchanged</div>
+                    </div>
+                  </div>
+
+                  {restorePreview.changes.length > 0 && (
+                    <div className="max-h-[300px] overflow-y-auto border border-zinc-800 rounded">
+                      <table className="w-full text-[11px]">
+                        <thead className="sticky top-0 bg-zinc-900">
+                          <tr className="text-zinc-500 border-b border-zinc-800">
+                            <th className="text-left py-1 px-2 font-medium">Email</th>
+                            <th className="text-left py-1 px-2 font-medium">From</th>
+                            <th className="text-center py-1 font-medium">&rarr;</th>
+                            <th className="text-left py-1 px-2 font-medium">To</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {restorePreview.changes.map((c) => (
+                            <tr key={c.email} className="border-b border-zinc-800/30">
+                              <td className="py-0.5 px-2 text-zinc-300 font-mono">{c.email}</td>
+                              <td className="py-0.5 px-2 text-zinc-500">{c.currentGroup}</td>
+                              <td className="py-0.5 text-center text-zinc-600">&rarr;</td>
+                              <td className="py-0.5 px-2 text-amber-400">{c.newGroup}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {restorePreview.changes.length === 0 && (
+                    <div className="text-center py-4 text-zinc-400 text-sm">
+                      Everything matches - no changes needed.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {backupTab === "import" && restoreStep === "done" && restorePreview && (
+                <div className="text-center py-6 space-y-2">
+                  <div className="text-3xl">&#10003;</div>
+                  <div className="text-sm text-zinc-200">
+                    Restored {restorePreview.applied ?? 0} assignments
+                  </div>
+                  <div className="text-xs text-zinc-400">
+                    Group mapping has been updated from the backup.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-zinc-800">
+              {backupTab === "import" && restoreStep === "preview" && restorePreview && (
+                <>
+                  <button
+                    onClick={() => {
+                      setRestoreStep("upload");
+                      setRestorePreview(null);
+                    }}
+                    className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200"
+                  >
+                    Back
+                  </button>
+                  {restorePreview.changes.length > 0 && (
+                    <button
+                      onClick={handleApplyRestore}
+                      disabled={restoreBusy}
+                      className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white rounded-md text-xs font-medium transition-colors"
+                    >
+                      {restoreBusy
+                        ? "Applying..."
+                        : `Apply ${restorePreview.changes.length} change${restorePreview.changes.length === 1 ? "" : "s"}`}
+                    </button>
+                  )}
+                </>
+              )}
+              {backupTab === "import" && restoreStep === "done" && (
+                <button
+                  onClick={closeBackup}
+                  className="px-4 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-white rounded-md text-xs font-medium transition-colors"
+                >
+                  Close
+                </button>
+              )}
+              {(backupTab === "export" || (backupTab === "import" && restoreStep === "upload")) && (
+                <button
+                  onClick={closeBackup}
+                  className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200"
+                >
+                  Close
                 </button>
               )}
             </div>
@@ -924,7 +1250,7 @@ function Field({
           className="bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-1 text-xs w-24 text-white focus:outline-none focus:ring-1 focus:ring-blue-500/50 font-mono"
         />
         {unit && <span className="text-[10px] text-zinc-600">{unit}</span>}
-        {suffix && <span className="text-[10px] text-zinc-500 font-mono">= {suffix}</span>}
+        {suffix && <span className="text-[10px] text-zinc-400 font-mono">= {suffix}</span>}
         {hint && <span className="text-[10px] text-zinc-600 italic">{hint}</span>}
       </div>
     </div>

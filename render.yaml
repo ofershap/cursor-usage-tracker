@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: cursor-usage-tracker
+    runtime: docker
+    plan: starter
+    autoDeploy: false
+    disk:
+      name: tracker-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: CURSOR_ADMIN_API_KEY
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
+      - key: DASHBOARD_URL
+        value: https://cursor-usage-tracker.onrender.com
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_CHANNEL_ID
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: NODE_ENV
+        value: production

@@ -20,11 +20,19 @@
 
 ---
 
+## Why This Exists
+
+This dashboard answers three questions:
+
+1. **Cost monitoring** - Are we spending too much? Who's driving it? Why?
+2. **Adoption tracking** - Is everyone using the tool we're paying for?
+3. **Usage understanding** - How is each person working with AI?
+
 ## AI Spend Is a Blind Spot
 
 Engineering costs used to be two things: headcount and cloud infrastructure. You had tools for both. Then AI coding assistants showed up, and suddenly there's a third cost center that nobody has good tooling for.
 
-A single developer on Cursor can burn through hundreds of dollars a day just by switching to an expensive model or letting an agent loop run wild. Now multiply that by 50, 100, 500 developers. The bill gets big fast, and there's nothing like Datadog or CloudHealth for this category yet.
+A single developer on Cursor can burn through hundreds of dollars a day just by switching to an expensive model or letting an agent loop run wild. Developers often don't know which models cost more - one of our team members used `opus-max` for weeks thinking it was a cheaper option. Now multiply that confusion by 50, 100, 500 developers. The bill gets big fast, and there's nothing like Datadog or CloudHealth for this category yet.
 
 Cursor's admin dashboard shows you the raw numbers, but it won't tell you when something is off. No anomaly detection. No alerts. No incident tracking. You find out about cost spikes when the invoice lands, weeks after the damage is done.
 
@@ -101,6 +109,18 @@ Anomaly Detected ──→ Alert Sent ──→ Acknowledged ──→ Resolved
 | **User Drilldown** | Per-user token timeline, model breakdown, feature usage, activity profile, anomaly history                                                                          |
 | **Anomalies**      | Open incidents, MTTD/MTTI/MTTR metrics, full anomaly timeline                                                                                                       |
 | **Settings**       | Detection thresholds, **billing group management** (rename, assign, create), **HiBob CSV import** with change preview                                               |
+
+---
+
+## Deploy
+
+### One-click deploy
+
+Deploy your own instance in minutes. You'll need a [Cursor Enterprise](https://cursor.com) plan and an Admin API key.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ofershap/cursor-usage-tracker)
+
+> **Railway and Docker** options below. Want help setting this up for your team — deployment, threshold tuning, first spend analysis, and ongoing support? [Let's talk](https://linkedin.com/in/ofershap).
 
 ---
 
@@ -206,9 +226,9 @@ This collects data, runs anomaly detection, and sends alerts in one call.
 
 ---
 
-## Docker
+## Production Deployment
 
-For production deployment:
+### Docker (self-hosted)
 
 ```bash
 cp .env.example .env   # configure your keys
@@ -235,6 +255,16 @@ volumes:
 ```
 
 </details>
+
+### Cloud platforms
+
+Any platform that supports Docker + persistent volumes works. Tested with:
+
+- **[Render](https://render.com)** — use the deploy button above, or `render.yaml` in this repo
+- **[Railway](https://railway.app)** — create a project from this repo, attach a volume at `/app/data`
+- **[Fly.io](https://fly.io)** — deploy with `fly launch`, create a volume for `/app/data`
+
+> **Note:** Vercel is not supported — SQLite requires a persistent filesystem that Vercel's serverless functions don't provide.
 
 ---
 

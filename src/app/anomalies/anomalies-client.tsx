@@ -190,7 +190,9 @@ export function AnomaliesClient({ timeline }: AnomaliesClientProps) {
                         className={`px-2 py-0.5 rounded text-xs ${
                           a.severity === "critical"
                             ? "bg-red-500/20 text-red-400"
-                            : "bg-yellow-500/20 text-yellow-400"
+                            : a.severity === "warning"
+                              ? "bg-yellow-500/20 text-yellow-400"
+                              : "bg-blue-500/20 text-blue-400"
                         }`}
                       >
                         {a.severity}

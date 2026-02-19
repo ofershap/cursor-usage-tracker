@@ -226,6 +226,88 @@ export async function sendSlackAlert(
   return postToSlack(token, channel, text, blocks);
 }
 
+export async function sendDailySummary(
+  summary: {
+    totalSpendDollars: number;
+    limitedUsersCount: number;
+    newPlanExhausted: number;
+    totalPlanExhausted: number;
+    totalActive: number;
+    topSpenders: Array<{ name: string; spend: number }>;
+    openAnomalies: number;
+    budgetThreshold?: number;
+  },
+  options: { dashboardUrl?: string; cursorDashboardUrl?: string } = {},
+): Promise<boolean> {
+  const token = process.env.SLACK_BOT_TOKEN;
+  const channel = process.env.SLACK_CHANNEL_ID;
+  if (!token || !channel) {
+    console.warn("[slack] Skipping daily summary - missing SLACK_BOT_TOKEN or SLACK_CHANNEL_ID");
+    return false;
+  }
+
+  const s = summary;
+  const lines: string[] = [];
+
+  lines.push(`*Team Spend:* $${s.totalSpendDollars.toLocaleString()} this cycle`);
+  if (s.budgetThreshold && s.budgetThreshold > 0) {
+    const pct = Math.round((s.totalSpendDollars / s.budgetThreshold) * 100);
+    lines.push(`*Budget:* ${pct}% of $${s.budgetThreshold.toLocaleString()} threshold`);
+  }
+  lines.push(
+    `*Plan Exhaustion:* ${s.totalPlanExhausted}/${s.totalActive} users exceeded plan${s.newPlanExhausted > 0 ? ` (+${s.newPlanExhausted} new today)` : ""}`,
+  );
+  if (s.limitedUsersCount > 0) {
+    lines.push(
+      `:rotating_light: *${s.limitedUsersCount} members limited* - unable to make requests`,
+    );
+  }
+  if (s.openAnomalies > 0) {
+    lines.push(`*Open Anomalies:* ${s.openAnomalies}`);
+  }
+
+  if (s.topSpenders.length > 0) {
+    lines.push("");
+    lines.push("*Top Spenders (cycle):*");
+    for (const t of s.topSpenders.slice(0, 5)) {
+      lines.push(`  ${t.name}: $${t.spend.toLocaleString()}`);
+    }
+  }
+
+  const blocks: SlackBlock[] = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: ":bar_chart: Cursor Usage - Daily Summary", emoji: true },
+    },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: lines.join("\n") },
+    },
+  ];
+
+  const links: string[] = [];
+  if (options.dashboardUrl) {
+    links.push(`<${options.dashboardUrl}|Dashboard>`);
+    links.push(`<${options.dashboardUrl}/anomalies|Anomalies>`);
+    links.push(`<${options.dashboardUrl}/insights|Insights>`);
+  }
+  links.push(`<${options.cursorDashboardUrl ?? "https://cursor.com/dashboard"}|Cursor Dashboard>`);
+
+  blocks.push({
+    type: "section",
+    text: { type: "mrkdwn", text: links.join(" · ") },
+  });
+
+  blocks.push({
+    type: "context",
+    elements: [
+      { type: "mrkdwn", text: `${new Date().toISOString().split("T")[0]} · cursor-usage-tracker` },
+    ],
+  });
+
+  return postToSlack(token, channel, "Cursor Usage - Daily Summary", blocks);
+}
+
 export async function sendSlackBatch(
   pairs: Array<{ anomaly: Anomaly; incident: Incident }>,
   options: { dashboardUrl?: string } = {},

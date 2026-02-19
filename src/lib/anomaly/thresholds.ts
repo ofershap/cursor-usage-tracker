@@ -81,5 +81,110 @@ export function detectThresholdAnomalies(config: DetectionConfig): Anomaly[] {
     }
   }
 
+  const cycleStartRow = db.prepare("SELECT MAX(cycle_start) as cs FROM spending").get() as {
+    cs: string | null;
+  };
+  const cycleStart = cycleStartRow?.cs;
+
+  if (cycleStart) {
+    const planExhausted = db
+      .prepare(
+        `SELECT du.email, m.name, MIN(du.date) as exhausted_on,
+           SUM(du.usage_based_reqs) as total_usage_reqs,
+           SUM(du.agent_requests) as total_agent_reqs
+         FROM daily_usage du
+         LEFT JOIN members m ON du.email = m.email
+         WHERE du.date >= ? AND du.usage_based_reqs > 0
+         GROUP BY du.email`,
+      )
+      .all(cycleStart) as Array<{
+      email: string;
+      name: string | null;
+      exhausted_on: string;
+      total_usage_reqs: number;
+      total_agent_reqs: number;
+    }>;
+
+    for (const u of planExhausted) {
+      const name = u.name ?? u.email;
+      const dayNum =
+        Math.floor(
+          (new Date(u.exhausted_on).getTime() - new Date(cycleStart).getTime()) /
+            (1000 * 60 * 60 * 24),
+        ) + 1;
+      anomalies.push({
+        userEmail: u.email,
+        type: "threshold",
+        severity: "info",
+        metric: "plan_exhausted",
+        value: u.total_usage_reqs,
+        threshold: 0,
+        message: `${name}: exceeded included plan usage on day ${dayNum} of cycle (${u.exhausted_on}). ${u.total_usage_reqs} extra requests billed since.`,
+        detectedAt: now,
+        resolvedAt: null,
+        alertedAt: null,
+        diagnosisModel: null,
+        diagnosisKind: null,
+        diagnosisDelta: null,
+      });
+    }
+  }
+
+  const limitedRow = db
+    .prepare("SELECT value FROM metadata WHERE key = 'limited_users_count'")
+    .get() as { value: string } | undefined;
+  const limitedCount = limitedRow ? parseInt(limitedRow.value, 10) : 0;
+
+  if (limitedCount > 0) {
+    anomalies.push({
+      userEmail: "team",
+      type: "threshold",
+      severity: "warning",
+      metric: "users_limited",
+      value: limitedCount,
+      threshold: 0,
+      message: `${limitedCount} team members are limited and unable to make requests. Review team spend limits on the Cursor dashboard.`,
+      detectedAt: now,
+      resolvedAt: null,
+      alertedAt: null,
+      diagnosisModel: null,
+      diagnosisKind: null,
+      diagnosisDelta: null,
+    });
+  }
+
+  const budgetRow = db
+    .prepare("SELECT value FROM metadata WHERE key = 'team_budget_threshold'")
+    .get() as { value: string } | undefined;
+  const budgetThreshold = budgetRow ? parseFloat(budgetRow.value) : 0;
+
+  if (budgetThreshold > 0) {
+    const teamSpendRow = db
+      .prepare(
+        `SELECT COALESCE(SUM(spend_cents), 0) as total FROM spending
+         WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)`,
+      )
+      .get() as { total: number };
+    const teamSpendDollars = teamSpendRow.total / 100;
+
+    if (teamSpendDollars >= budgetThreshold) {
+      anomalies.push({
+        userEmail: "team",
+        type: "threshold",
+        severity: teamSpendDollars >= budgetThreshold * 1.1 ? "critical" : "warning",
+        metric: "team_budget",
+        value: Math.round(teamSpendDollars * 100),
+        threshold: Math.round(budgetThreshold * 100),
+        message: `Team spend $${Math.round(teamSpendDollars).toLocaleString()} has reached the $${Math.round(budgetThreshold).toLocaleString()} budget threshold (${Math.round((teamSpendDollars / budgetThreshold) * 100)}%).`,
+        detectedAt: now,
+        resolvedAt: null,
+        alertedAt: null,
+        diagnosisModel: null,
+        diagnosisKind: null,
+        diagnosisDelta: null,
+      });
+    }
+  }
+
   return anomalies;
 }

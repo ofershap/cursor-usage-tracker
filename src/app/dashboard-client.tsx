@@ -443,7 +443,7 @@ function ModelCostTable({ data }: { data: ModelCost[] }) {
 
   return (
     <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-      <h3 className="text-xs font-medium text-zinc-500 mb-2">
+      <h3 className="text-xs font-medium text-zinc-400 mb-2">
         Spend by Model (Primary Model per User)
       </h3>
       <div className="overflow-y-auto max-h-[200px]">
@@ -492,9 +492,9 @@ function ModelCostTable({ data }: { data: ModelCost[] }) {
 function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 min-w-0 flex-1">
-      <div className="text-[10px] text-zinc-500 truncate">{label}</div>
-      <div className="text-lg font-bold tracking-tight leading-tight">{value}</div>
-      {sub && <div className="text-[10px] text-zinc-500 truncate">{sub}</div>}
+      <div className="text-[10px] text-zinc-400 truncate">{label}</div>
+      <div className="text-lg font-bold tracking-tight leading-tight text-zinc-100">{value}</div>
+      {sub && <div className="text-[10px] text-zinc-400 truncate">{sub}</div>}
     </div>
   );
 }
@@ -517,10 +517,10 @@ function KpiLink({
       href={href}
       className={`bg-zinc-900 border rounded-md px-3 py-2 min-w-0 flex-1 hover:bg-zinc-800/70 transition-colors cursor-pointer ${alert ? "border-red-500/50" : "border-zinc-800"}`}
     >
-      <div className="text-[10px] text-zinc-500 truncate">{label}</div>
-      <div className="text-lg font-bold tracking-tight leading-tight">{value}</div>
+      <div className="text-[10px] text-zinc-400 truncate">{label}</div>
+      <div className="text-lg font-bold tracking-tight leading-tight text-zinc-100">{value}</div>
       {sub && (
-        <div className={`text-[10px] truncate ${alert ? "text-red-400" : "text-zinc-500"}`}>
+        <div className={`text-[10px] truncate ${alert ? "text-red-400" : "text-zinc-400"}`}>
           {sub}
         </div>
       )}

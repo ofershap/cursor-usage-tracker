@@ -5,9 +5,11 @@ import {
   getAnalyticsAgentEditsTrend,
   getAnalyticsTabsTrend,
   getAnalyticsMCPSummary,
+  getAnalyticsCommandsSummary,
   getAnalyticsFileExtensionsSummary,
   getAnalyticsClientVersionsSummary,
   getModelEfficiency,
+  getPlanExhaustionStats,
 } from "@/lib/db";
 import { InsightsClient } from "./insights-client";
 
@@ -22,9 +24,11 @@ export default function InsightsPage() {
       agentEdits: getAnalyticsAgentEditsTrend(30),
       tabs: getAnalyticsTabsTrend(30),
       mcp: getAnalyticsMCPSummary(30),
+      commands: getAnalyticsCommandsSummary(30),
       fileExtensions: getAnalyticsFileExtensionsSummary(30),
       clientVersions: getAnalyticsClientVersionsSummary(),
       modelEfficiency: getModelEfficiency(),
+      planExhaustion: getPlanExhaustionStats(),
     };
 
     return <InsightsClient data={data} />;

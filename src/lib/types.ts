@@ -92,44 +92,6 @@ export interface SpendResponse {
   maxUserSpendCents: number;
 }
 
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheWriteTokens: number;
-  cacheReadTokens: number;
-  totalCents: number;
-}
-
-export interface RawUsageEvent {
-  timestamp: string;
-  model: string;
-  kind: string;
-  maxMode: boolean;
-  requestsCosts: number;
-  isTokenBasedCall: boolean;
-  tokenUsage: TokenUsage | null;
-  userEmail: string;
-  isChargeable: boolean;
-  isHeadless: boolean;
-}
-
-export interface UsageEvent {
-  timestamp: Date;
-  model: string;
-  kind: string;
-  maxMode: boolean;
-  requestsCostCents: number;
-  totalCents: number;
-  totalTokens: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  userEmail: string;
-  isChargeable: boolean;
-  isHeadless: boolean;
-}
-
 export interface AnalyticsDAUEntry {
   date: string;
   dau: number;
@@ -180,53 +142,6 @@ export interface AnalyticsAgentEditsResponse {
   params: Record<string, unknown>;
 }
 
-export interface LeaderboardUser {
-  email: string;
-  user_id: string;
-  total_accepts: number;
-  total_lines_accepted: number;
-  total_lines_suggested: number;
-  line_acceptance_ratio: number;
-  accept_ratio?: number;
-  favorite_model?: string;
-  rank: number;
-}
-
-export interface AnalyticsLeaderboardResponse {
-  data: {
-    tab_leaderboard: {
-      data: LeaderboardUser[];
-      total_users: number;
-    };
-    agent_leaderboard: {
-      data: LeaderboardUser[];
-      total_users: number;
-    };
-  };
-  pagination: {
-    page: number;
-    pageSize: number;
-    totalUsers: number;
-    totalPages: number;
-    hasNextPage: boolean;
-    hasPreviousPage: boolean;
-  };
-  params: Record<string, unknown>;
-}
-
-export interface AnalyticsByUserResponse {
-  data: Record<string, unknown[]>;
-  pagination: {
-    page: number;
-    pageSize: number;
-    totalUsers: number;
-    totalPages: number;
-    hasNextPage: boolean;
-    hasPreviousPage: boolean;
-  };
-  params: Record<string, unknown>;
-}
-
 export interface AnalyticsTabsEntry {
   event_date: string;
   total_suggestions: number;
@@ -259,17 +174,6 @@ export interface AnalyticsMCPResponse {
   params: Record<string, unknown>;
 }
 
-export interface AnalyticsCommandsEntry {
-  event_date: string;
-  command_name: string;
-  usage: number;
-}
-
-export interface AnalyticsCommandsResponse {
-  data: AnalyticsCommandsEntry[];
-  params: Record<string, unknown>;
-}
-
 export interface AnalyticsFileExtensionsEntry {
   event_date: string;
   file_extension: string;
@@ -296,6 +200,60 @@ export interface AnalyticsClientVersionsEntry {
 export interface AnalyticsClientVersionsResponse {
   data: AnalyticsClientVersionsEntry[];
   params: Record<string, unknown>;
+}
+
+export interface AnalyticsCommandsEntry {
+  event_date: string;
+  command_name: string;
+  usage: number;
+}
+
+export interface AnalyticsCommandsResponse {
+  data: AnalyticsCommandsEntry[];
+  params: Record<string, unknown>;
+}
+
+export interface AnalyticsPlansEntry {
+  event_date: string;
+  model: string;
+  usage: number;
+}
+
+export interface AnalyticsPlansResponse {
+  data: AnalyticsPlansEntry[];
+  params: Record<string, unknown>;
+}
+
+export interface FilteredUsageEvent {
+  timestamp: string;
+  model: string;
+  kind: string;
+  maxMode: boolean;
+  requestsCosts: number;
+  isTokenBasedCall: boolean;
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheWriteTokens: number;
+    cacheReadTokens: number;
+    totalCents: number;
+  };
+  userEmail: string;
+  isChargeable: boolean;
+  isHeadless: boolean;
+}
+
+export interface FilteredUsageEventsResponse {
+  totalUsageEventsCount: number;
+  pagination: {
+    numPages: number;
+    currentPage: number;
+    pageSize: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+  usageEvents: FilteredUsageEvent[];
+  period: { startDate: number; endDate: number };
 }
 
 export interface GroupMemberSpend {
@@ -327,9 +285,15 @@ export interface GroupsResponse {
   };
 }
 
-export type AnomalySeverity = "warning" | "critical";
+export type AnomalySeverity = "info" | "warning" | "critical";
 export type AnomalyType = "threshold" | "zscore" | "trend";
-export type AnomalyMetric = "spend" | "requests" | "tokens" | "usage_based";
+export type AnomalyMetric =
+  | "spend"
+  | "requests"
+  | "tokens"
+  | "plan_exhausted"
+  | "users_limited"
+  | "team_budget";
 
 export interface Anomaly {
   id?: number;
@@ -368,7 +332,6 @@ export interface DetectionConfig {
   thresholds: {
     maxSpendCentsPerCycle: number;
     maxRequestsPerDay: number;
-    maxTokensPerDay: number;
   };
   zscore: {
     multiplier: number;
@@ -386,7 +349,6 @@ export const DEFAULT_CONFIG: DetectionConfig = {
   thresholds: {
     maxSpendCentsPerCycle: 0,
     maxRequestsPerDay: 0,
-    maxTokensPerDay: 0,
   },
   zscore: {
     multiplier: 2.5,

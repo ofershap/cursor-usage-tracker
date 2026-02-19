@@ -15,11 +15,11 @@ export function StatCard({ title, value, subtitle, trend, alert, href }: StatCar
   const borderColor = alert ? "border-red-500/50" : "border-zinc-800";
 
   const trendColor =
-    trend === "up" ? "text-red-400" : trend === "down" ? "text-green-400" : "text-zinc-500";
+    trend === "up" ? "text-red-400" : trend === "down" ? "text-green-400" : "text-zinc-400";
 
   const content = (
     <>
-      <p className="text-xs text-zinc-500 mb-0.5">{title}</p>
+      <p className="text-xs text-zinc-400 mb-0.5">{title}</p>
       <p className="text-xl font-bold tracking-tight">{value}</p>
       {subtitle && <p className={`text-xs mt-0.5 ${trendColor}`}>{subtitle}</p>}
     </>

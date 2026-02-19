@@ -6,8 +6,10 @@ import {
   getAnalyticsAgentEditsTrend,
   getAnalyticsTabsTrend,
   getAnalyticsMCPSummary,
+  getAnalyticsCommandsSummary,
   getAnalyticsFileExtensionsSummary,
   getAnalyticsClientVersionsSummary,
+  getPlanExhaustionStats,
 } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -24,8 +26,10 @@ export function GET(request: Request) {
       agentEdits: getAnalyticsAgentEditsTrend(days),
       tabs: getAnalyticsTabsTrend(days),
       mcp: getAnalyticsMCPSummary(days),
+      commands: getAnalyticsCommandsSummary(days),
       fileExtensions: getAnalyticsFileExtensionsSummary(days),
       clientVersions: getAnalyticsClientVersionsSummary(),
+      planExhaustion: getPlanExhaustionStats(),
     });
   } catch {
     return NextResponse.json({ error: "No analytics data yet" }, { status: 404 });

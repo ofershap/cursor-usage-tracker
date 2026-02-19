@@ -4,19 +4,17 @@ import type {
   DailyUsageResponse,
   MemberSpend,
   SpendResponse,
-  RawUsageEvent,
-  UsageEvent,
   GroupsResponse,
+  FilteredUsageEventsResponse,
   AnalyticsDAUResponse,
   AnalyticsModelUsageResponse,
   AnalyticsAgentEditsResponse,
-  AnalyticsLeaderboardResponse,
-  AnalyticsByUserResponse,
   AnalyticsTabsResponse,
   AnalyticsMCPResponse,
-  AnalyticsCommandsResponse,
   AnalyticsFileExtensionsResponse,
   AnalyticsClientVersionsResponse,
+  AnalyticsCommandsResponse,
+  AnalyticsPlansResponse,
 } from "./types";
 
 interface CursorClientOptions {
@@ -75,15 +73,21 @@ export class CursorClient {
     return data.teamMembers;
   }
 
-  async getDailyUsage(options: { pageSize?: number } = {}): Promise<DailyUsage[]> {
+  async getDailyUsage(
+    options: { pageSize?: number; startDate?: number; endDate?: number } = {},
+  ): Promise<DailyUsage[]> {
     const allEntries: DailyUsage[] = [];
     let page = 1;
     const pageSize = options.pageSize ?? 100;
 
     while (true) {
+      const body: Record<string, unknown> = { page, pageSize };
+      if (options.startDate) body.startDate = options.startDate;
+      if (options.endDate) body.endDate = options.endDate;
+
       const data = await this.request<DailyUsageResponse>("/teams/daily-usage-data", {
         method: "POST",
-        body: { page, pageSize },
+        body,
       });
 
       for (const entry of data.data) {
@@ -125,9 +129,11 @@ export class CursorClient {
   async getSpending(): Promise<{
     members: MemberSpend[];
     cycleStart: string;
+    limitedUsersCount: number;
   }> {
     const allMembers: MemberSpend[] = [];
     let cycleStart: string | undefined;
+    let limitedUsersCount = 0;
     let page = 1;
 
     while (true) {
@@ -137,6 +143,7 @@ export class CursorClient {
       });
 
       cycleStart = new Date(data.subscriptionCycleStart).toISOString().split("T")[0] ?? "";
+      limitedUsersCount = data.limitedUsersCount ?? 0;
 
       allMembers.push(...data.teamMemberSpend);
 
@@ -144,65 +151,7 @@ export class CursorClient {
       page++;
     }
 
-    return { members: allMembers, cycleStart: cycleStart ?? "" };
-  }
-
-  async getUsageEvents(
-    options: {
-      email?: string;
-      startDate?: Date;
-      endDate?: Date;
-      pageSize?: number;
-    } = {},
-  ): Promise<UsageEvent[]> {
-    const allEvents: UsageEvent[] = [];
-    let page = 1;
-    const pageSize = options.pageSize ?? 100;
-
-    while (true) {
-      const body: Record<string, unknown> = { page, pageSize };
-      if (options.email) body.email = options.email;
-      if (options.startDate) body.startDate = options.startDate.getTime();
-      if (options.endDate) body.endDate = options.endDate.getTime();
-
-      const data = await this.request<{
-        usageEvents: RawUsageEvent[];
-        pagination: { hasNextPage: boolean };
-      }>("/teams/filtered-usage-events", {
-        method: "POST",
-        body,
-      });
-
-      for (const raw of data.usageEvents) {
-        const ts = new Date(parseInt(raw.timestamp, 10));
-        const input = raw.tokenUsage?.inputTokens ?? 0;
-        const output = raw.tokenUsage?.outputTokens ?? 0;
-        const cacheRead = raw.tokenUsage?.cacheReadTokens ?? 0;
-        const cacheWrite = raw.tokenUsage?.cacheWriteTokens ?? 0;
-
-        allEvents.push({
-          timestamp: ts,
-          model: raw.model,
-          kind: raw.kind,
-          maxMode: raw.maxMode,
-          requestsCostCents: raw.requestsCosts,
-          totalCents: raw.tokenUsage?.totalCents ?? 0,
-          totalTokens: input + output + cacheRead + cacheWrite,
-          inputTokens: input,
-          outputTokens: output,
-          cacheReadTokens: cacheRead,
-          cacheWriteTokens: cacheWrite,
-          userEmail: raw.userEmail,
-          isChargeable: raw.isChargeable,
-          isHeadless: raw.isHeadless,
-        });
-      }
-
-      if (!data.pagination.hasNextPage) break;
-      page++;
-    }
-
-    return allEvents;
+    return { members: allMembers, cycleStart: cycleStart ?? "", limitedUsersCount };
   }
 
   async getBillingGroups(): Promise<GroupsResponse> {
@@ -233,64 +182,6 @@ export class CursorClient {
     );
   }
 
-  async getAnalyticsLeaderboard(
-    options: {
-      startDate?: string;
-      endDate?: string;
-      page?: number;
-      pageSize?: number;
-      users?: string[];
-    } = {},
-  ): Promise<AnalyticsLeaderboardResponse> {
-    const params = new URLSearchParams();
-    params.set("startDate", options.startDate ?? "30d");
-    params.set("endDate", options.endDate ?? "today");
-    if (options.page) params.set("page", String(options.page));
-    if (options.pageSize) params.set("pageSize", String(options.pageSize));
-    if (options.users?.length) params.set("users", options.users.join(","));
-    return this.request<AnalyticsLeaderboardResponse>(
-      `/analytics/team/leaderboard?${params.toString()}`,
-    );
-  }
-
-  async getAnalyticsByUserModels(
-    options: {
-      startDate?: string;
-      endDate?: string;
-      page?: number;
-      pageSize?: number;
-      users?: string[];
-    } = {},
-  ): Promise<AnalyticsByUserResponse> {
-    const params = new URLSearchParams();
-    params.set("startDate", options.startDate ?? "30d");
-    params.set("endDate", options.endDate ?? "today");
-    if (options.page) params.set("page", String(options.page));
-    if (options.pageSize) params.set("pageSize", String(options.pageSize));
-    if (options.users?.length) params.set("users", options.users.join(","));
-    return this.request<AnalyticsByUserResponse>(`/analytics/by-user/models?${params.toString()}`);
-  }
-
-  async getAnalyticsByUserAgentEdits(
-    options: {
-      startDate?: string;
-      endDate?: string;
-      page?: number;
-      pageSize?: number;
-      users?: string[];
-    } = {},
-  ): Promise<AnalyticsByUserResponse> {
-    const params = new URLSearchParams();
-    params.set("startDate", options.startDate ?? "30d");
-    params.set("endDate", options.endDate ?? "today");
-    if (options.page) params.set("page", String(options.page));
-    if (options.pageSize) params.set("pageSize", String(options.pageSize));
-    if (options.users?.length) params.set("users", options.users.join(","));
-    return this.request<AnalyticsByUserResponse>(
-      `/analytics/by-user/agent-edits?${params.toString()}`,
-    );
-  }
-
   async getAnalyticsTabs(
     options: { startDate?: string; endDate?: string; users?: string[] } = {},
   ): Promise<AnalyticsTabsResponse> {
@@ -303,13 +194,6 @@ export class CursorClient {
   ): Promise<AnalyticsMCPResponse> {
     const params = this.analyticsParams(options);
     return this.request<AnalyticsMCPResponse>(`/analytics/team/mcp?${params}`);
-  }
-
-  async getAnalyticsCommands(
-    options: { startDate?: string; endDate?: string; users?: string[] } = {},
-  ): Promise<AnalyticsCommandsResponse> {
-    const params = this.analyticsParams(options);
-    return this.request<AnalyticsCommandsResponse>(`/analytics/team/commands?${params}`);
   }
 
   async getAnalyticsFileExtensions(
@@ -327,6 +211,41 @@ export class CursorClient {
     const params = this.analyticsParams(options);
     return this.request<AnalyticsClientVersionsResponse>(
       `/analytics/team/client-versions?${params}`,
+    );
+  }
+
+  async getFilteredUsageEvents(options: {
+    email?: string;
+    startDate?: number;
+    endDate?: number;
+    page?: number;
+    pageSize?: number;
+  }): Promise<FilteredUsageEventsResponse> {
+    return this.request<FilteredUsageEventsResponse>("/teams/filtered-usage-events", {
+      method: "POST",
+      body: {
+        email: options.email,
+        startDate: options.startDate,
+        endDate: options.endDate,
+        page: options.page ?? 1,
+        pageSize: options.pageSize ?? 500,
+      },
+    });
+  }
+
+  async getAnalyticsCommands(
+    options: { startDate?: string; endDate?: string; users?: string[] } = {},
+  ): Promise<AnalyticsCommandsResponse> {
+    return this.request<AnalyticsCommandsResponse>(
+      `/analytics/team/commands?${this.analyticsParams(options)}`,
+    );
+  }
+
+  async getAnalyticsPlans(
+    options: { startDate?: string; endDate?: string; users?: string[] } = {},
+  ): Promise<AnalyticsPlansResponse> {
+    return this.request<AnalyticsPlansResponse>(
+      `/analytics/team/plans?${this.analyticsParams(options)}`,
     );
   }
 

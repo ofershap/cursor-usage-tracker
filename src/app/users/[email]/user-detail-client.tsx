@@ -1,10 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { TokensLineChart } from "@/components/charts/tokens-line-chart";
-import { ModelPieChart } from "@/components/charts/model-pie-chart";
+import {
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts";
 import { SpendTrendChart } from "@/components/charts/spend-trend-chart";
-import { ActivityRadarChart } from "@/components/charts/activity-radar-chart";
 import { formatDateShort } from "@/lib/date-utils";
 import { shortModel } from "@/lib/format-utils";
 import type { Anomaly } from "@/lib/types";
@@ -34,7 +39,17 @@ interface UserStats {
   modelBreakdown: Array<{ model: string; days_used: number; total_requests: number }>;
   anomalies: Anomaly[];
   dailySpend: Array<{ date: string; spend_cents: number }>;
-  activityProfile: { user: Record<string, number>; teamAvg: Record<string, number> };
+  usageEventsSummary: Array<{
+    model: string;
+    requests: number;
+    total_cost_cents: number;
+    avg_cost_cents: number;
+    plan_reqs: number;
+    plan_cost_cents: number;
+    overage_reqs: number;
+    overage_cost_cents: number;
+    error_reqs: number;
+  }>;
 }
 
 interface UserDetailClientProps {
@@ -54,30 +69,19 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
   const totalAgentRequests = stats.dailyActivity.reduce((sum, d) => sum + d.agent_requests, 0);
   const totalLinesAdded = stats.dailyActivity.reduce((sum, d) => sum + d.lines_added, 0);
   const openAnomalies = stats.anomalies.filter((a) => !a.resolvedAt);
-
-  const chartData = stats.dailyActivity.map((d) => ({
-    date: d.date,
-    tokens: d.agent_requests,
-    requests: d.usage_based_reqs,
-  }));
-
-  const modelData = stats.modelBreakdown.map((m) => ({
-    model: m.model,
-    count: m.days_used,
-    tokens: m.total_requests,
-  }));
-
-  const totalSpendDollars = currentSpend ? currentSpend.spend_cents / 100 : 0;
+  const totalSpendCents = stats.dailySpend.reduce((s, d) => s + d.spend_cents, 0);
+  const totalSpendDollars = totalSpendCents / 100;
+  const dollarsPerReq =
+    totalAgentRequests > 0 ? (totalSpendCents / totalAgentRequests / 100).toFixed(2) : null;
   const dailyAvgSpend =
-    stats.dailySpend.length > 0
-      ? stats.dailySpend.reduce((s, d) => s + d.spend_cents, 0) / stats.dailySpend.length / 100
-      : 0;
+    stats.dailySpend.length > 0 ? totalSpendDollars / stats.dailySpend.length : 0;
+  const cycleSpendDollars = currentSpend ? currentSpend.spend_cents / 100 : 0;
 
   const mergedDailyData = buildMergedDailyData(stats.dailySpend, stats.dailyActivity);
+  const hasUsageEvents = stats.usageEventsSummary.length > 0;
 
   return (
     <div className="space-y-3">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <Link href="/" className="text-xs text-zinc-500 hover:text-zinc-300">
           ← Back
@@ -90,20 +94,23 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
         </div>
       </div>
 
-      {/* KPI Strip */}
       <div className="flex items-stretch gap-2 overflow-x-auto">
         <KpiCard
           label="Cycle Spend"
-          value={`$${Math.round(totalSpendDollars).toLocaleString()}`}
+          value={`$${Math.round(cycleSpendDollars).toLocaleString()}`}
           sub={`~$${dailyAvgSpend.toFixed(0)}/day`}
         />
         <KpiCard
-          label="Premium Reqs"
-          value={(currentSpend?.fast_premium_requests ?? 0).toLocaleString()}
-          sub="Current cycle"
+          label="$/Req"
+          value={dollarsPerReq != null ? `$${dollarsPerReq}` : "—"}
+          sub="Cost per request"
         />
         <KpiCard label={`Agent Reqs (${activityDays}d)`} value={fmt(totalAgentRequests)} />
-        <KpiCard label={`Lines Added (${activityDays}d)`} value={fmt(totalLinesAdded)} />
+        <KpiCard
+          label={`Lines Added (${activityDays}d)`}
+          value={fmt(totalLinesAdded)}
+          sub="AI + manual + paste"
+        />
         <KpiCard
           label="Anomalies"
           value={openAnomalies.length.toString()}
@@ -112,37 +119,149 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
         />
       </div>
 
-      {/* Row 1: Spend Trend + Activity Radar */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <SpendTrendChart data={stats.dailySpend} />
-        <ActivityRadarChart
-          user={stats.activityProfile.user}
-          teamAvg={stats.activityProfile.teamAvg}
+        <SpendTrendChart
+          data={stats.dailySpend.map((d) => {
+            const activity = stats.dailyActivity.find((a) => a.date === d.date);
+            return {
+              ...d,
+              agent_requests: activity?.agent_requests,
+              lines_added: activity?.lines_added,
+              lines_deleted: activity?.lines_deleted,
+            };
+          })}
         />
+        <UsageProfileRadar stats={stats} />
       </div>
 
-      {/* Row 2: Daily Requests + Model Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <TokensLineChart data={chartData} />
-        <ModelPieChart data={modelData} />
-      </div>
+      {hasUsageEvents && (
+        <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-zinc-800">
+            <h3 className="text-xs font-medium text-zinc-400">Cost Breakdown</h3>
+          </div>
+          <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-zinc-900 z-10">
+                <tr className="border-b border-zinc-800 text-zinc-500">
+                  <th className="text-left px-4 py-2 font-medium w-[140px]">Model</th>
+                  <th className="text-right px-4 py-2 font-medium">Requests</th>
+                  <th className="text-right px-4 py-2 font-medium">$/Req</th>
+                  <th className="text-right px-4 py-2 font-medium">Total</th>
+                  <th className="text-left px-4 py-2 font-medium">Included in Plan vs Overage</th>
+                  <th className="text-right px-4 py-2 font-medium">Errors</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.usageEventsSummary.map((r) => {
+                  const totalDollars = r.total_cost_cents / 100;
+                  const planPct =
+                    r.total_cost_cents > 0 ? (r.plan_cost_cents / r.total_cost_cents) * 100 : 0;
+                  const overagePct = 100 - planPct;
+                  return (
+                    <tr key={r.model} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                      <td className="px-4 py-2 text-zinc-400 cursor-default" title={r.model}>
+                        {shortModel(r.model)}
+                      </td>
+                      <td className="text-right px-4 py-2 font-mono">
+                        {r.requests.toLocaleString()}
+                      </td>
+                      <td className="text-right px-4 py-2 font-mono">
+                        ${(r.avg_cost_cents / 100).toFixed(2)}
+                      </td>
+                      <td className="text-right px-4 py-2 font-mono font-bold">
+                        $
+                        {totalDollars >= 1
+                          ? Math.round(totalDollars).toLocaleString()
+                          : totalDollars.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden flex"
+                            title={`Included in plan: $${Math.round(r.plan_cost_cents / 100)} (${r.plan_reqs} reqs) · Overage: $${Math.round(r.overage_cost_cents / 100)} (${r.overage_reqs} reqs)`}
+                          >
+                            {planPct > 0 && (
+                              <div
+                                className="h-full bg-blue-500"
+                                style={{ width: `${planPct}%` }}
+                              />
+                            )}
+                            {overagePct > 0 && (
+                              <div
+                                className="h-full bg-amber-500"
+                                style={{ width: `${overagePct}%` }}
+                              />
+                            )}
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-500 w-8 text-right shrink-0">
+                            {r.overage_reqs > 0 ? `${Math.round(overagePct)}%` : ""}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="text-right px-4 py-2 font-mono">
+                        {r.error_reqs > 0 ? (
+                          <span
+                            className="text-red-400/70"
+                            title={`${r.error_reqs} errored requests (not charged)`}
+                          >
+                            {r.error_reqs}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-700">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div className="flex items-center gap-4 px-4 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-400">
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" /> Included in plan
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Overage
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* Daily Activity Table - merged with spend data */}
       <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
         <div className="px-4 py-2.5 border-b border-zinc-800">
-          <h3 className="text-xs font-medium text-zinc-500">Daily Activity & Spend</h3>
+          <h3 className="text-xs font-medium text-zinc-400">Daily Activity & Spend</h3>
         </div>
         <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-zinc-900 z-10">
               <tr className="border-b border-zinc-800 text-zinc-500">
                 <th className="text-left px-4 py-2 font-medium">Date</th>
-                <th className="text-right px-4 py-2 font-medium">Spend</th>
-                <th className="text-right px-4 py-2 font-medium">Agent</th>
-                <th className="text-right px-4 py-2 font-medium">Lines +/-</th>
-                <th className="text-right px-4 py-2 font-medium">Accepts</th>
-                <th className="text-right px-4 py-2 font-medium">Tabs</th>
                 <th className="text-right px-4 py-2 font-medium">Model</th>
+                <th
+                  className="text-right px-4 py-2 font-medium cursor-default"
+                  title="Agent mode requests (primary AI interaction)"
+                >
+                  Requests
+                </th>
+                <th className="text-right px-4 py-2 font-medium">Spend</th>
+                <th
+                  className="text-right px-4 py-2 font-medium cursor-default"
+                  title="Total lines added/deleted in editor — includes AI, manual typing, paste, refactoring"
+                >
+                  Lines +/-
+                </th>
+                <th
+                  className="text-right px-4 py-2 font-medium cursor-default"
+                  title="Agent diffs accepted by user"
+                >
+                  Accepts
+                </th>
+                <th
+                  className="text-right px-4 py-2 font-medium cursor-default"
+                  title="Tab completions accepted"
+                >
+                  Tabs
+                </th>
                 <th className="text-right px-4 py-2 font-medium">Version</th>
               </tr>
             </thead>
@@ -155,18 +274,34 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
                   <td className="px-4 py-1.5 text-zinc-400 whitespace-nowrap">
                     {formatDateShort(d.date)}
                   </td>
+                  <td
+                    className="text-right px-4 py-1.5 text-zinc-500 cursor-default"
+                    title={d.most_used_model}
+                  >
+                    {shortModel(d.most_used_model)}
+                  </td>
                   <td className="text-right px-4 py-1.5 font-mono">
-                    {d.spend > 0 ? (
-                      <span className={d.isSpike ? "text-red-400 font-bold" : "text-zinc-300"}>
-                        ${d.spend.toFixed(0)}
+                    {d.agent_requests > 0 ? (
+                      <span className="text-zinc-300">
+                        {d.usage_based_reqs > 0 && (
+                          <span
+                            className="mr-1 text-amber-400/80 text-[10px] cursor-default"
+                            title={`${d.usage_based_reqs} of these were usage-based (beyond plan)`}
+                          >
+                            ${"\u2022"}
+                          </span>
+                        )}
+                        {d.agent_requests}
                       </span>
                     ) : (
                       <span className="text-zinc-700">—</span>
                     )}
                   </td>
                   <td className="text-right px-4 py-1.5 font-mono">
-                    {d.agent_requests > 0 ? (
-                      d.agent_requests
+                    {d.spend > 0 ? (
+                      <span className={d.isSpike ? "text-red-400 font-bold" : "text-amber-400"}>
+                        {d.spend < 1 ? d.spend.toFixed(2) : Math.round(d.spend)}$
+                      </span>
                     ) : (
                       <span className="text-zinc-700">—</span>
                     )}
@@ -196,12 +331,6 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
                       <span className="text-zinc-700">—</span>
                     )}
                   </td>
-                  <td
-                    className="text-right px-4 py-1.5 text-zinc-500 cursor-default"
-                    title={d.most_used_model}
-                  >
-                    {shortModel(d.most_used_model)}
-                  </td>
                   <td className="text-right px-4 py-1.5 text-zinc-600">{d.client_version}</td>
                 </tr>
               ))}
@@ -210,11 +339,10 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
         </div>
       </div>
 
-      {/* Anomaly History */}
       {stats.anomalies.length > 0 && (
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
           <div className="px-4 py-2.5 border-b border-zinc-800">
-            <h3 className="text-xs font-medium text-zinc-500">Anomaly History</h3>
+            <h3 className="text-xs font-medium text-zinc-400">Anomaly History</h3>
           </div>
           <div className="overflow-x-auto max-h-[250px] overflow-y-auto">
             <table className="w-full text-xs">
@@ -240,7 +368,7 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
                     </td>
                     <td className="px-4 py-1.5">
                       <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] ${a.severity === "critical" ? "bg-red-500/20 text-red-400" : "bg-yellow-500/20 text-yellow-400"}`}
+                        className={`px-1.5 py-0.5 rounded text-[10px] ${a.severity === "critical" ? "bg-red-500/20 text-red-400" : a.severity === "warning" ? "bg-yellow-500/20 text-yellow-400" : "bg-blue-500/20 text-blue-400"}`}
                       >
                         {a.severity}
                       </span>
@@ -270,12 +398,91 @@ interface MergedDay {
   isSpike: boolean;
   hasActivity: boolean;
   agent_requests: number;
+  usage_based_reqs: number;
   lines_added: number;
   lines_deleted: number;
   total_accepts: number;
   tabs_accepted: number;
   most_used_model: string;
   client_version: string;
+}
+
+const RADAR_TOOLTIP_STYLE = {
+  backgroundColor: "#18181b",
+  border: "1px solid #3f3f46",
+  borderRadius: "6px",
+  fontSize: "11px",
+  color: "#fafafa",
+} as const;
+
+function UsageProfileRadar({ stats }: { stats: UserStats }) {
+  const da = stats.dailyActivity;
+  const totalDays = da.length;
+  const activeDays = da.filter((d) => d.agent_requests > 0).length;
+  const totalReqs = da.reduce((s, d) => s + d.agent_requests, 0);
+  const totalTabs = da.reduce((s, d) => s + d.tabs_accepted, 0);
+  const totalAccepts = da.reduce((s, d) => s + d.total_accepts, 0);
+  const totalRejects = da.reduce((s, d) => s + d.total_rejects, 0);
+  const totalUsageBased = da.reduce((s, d) => s + d.usage_based_reqs, 0);
+  const totalSpendCents = stats.dailySpend.reduce((s, d) => s + d.spend_cents, 0);
+
+  const activityPct = totalDays > 0 ? Math.round((activeDays / totalDays) * 100) : 0;
+  const reqsPerDay = activeDays > 0 ? Math.round(totalReqs / activeDays) : 0;
+  const intensityPct = Math.min(100, Math.round((reqsPerDay / 150) * 100));
+  const tabPct = totalReqs > 0 ? Math.min(100, Math.round((totalTabs / totalReqs) * 200)) : 0;
+  const acceptRate =
+    totalAccepts + totalRejects > 0
+      ? Math.round((totalAccepts / (totalAccepts + totalRejects)) * 100)
+      : 0;
+  const overagePct = totalReqs > 0 ? Math.round((totalUsageBased / totalReqs) * 100) : 0;
+  const costPerReq = totalReqs > 0 ? totalSpendCents / totalReqs / 100 : 0;
+  const efficiencyPct = Math.min(100, Math.max(0, Math.round((1 - costPerReq / 2) * 100)));
+
+  const radarData = [
+    { axis: "Activity", value: activityPct, detail: `${activeDays}/${totalDays} days active` },
+    { axis: "Intensity", value: intensityPct, detail: `${reqsPerDay} reqs/active day` },
+    { axis: "Tab Usage", value: tabPct, detail: `${totalTabs} tab accepts` },
+    { axis: "Precision", value: acceptRate, detail: `${acceptRate}% accept rate` },
+    {
+      axis: "On Plan",
+      value: 100 - overagePct,
+      detail: `${100 - overagePct}% of requests covered by plan`,
+    },
+    { axis: "Efficiency", value: efficiencyPct, detail: `$${costPerReq.toFixed(2)} per request` },
+  ];
+
+  return (
+    <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
+      <h3 className="text-xs font-medium text-zinc-400 mb-1">Usage Profile</h3>
+      <ResponsiveContainer width="100%" height={220}>
+        <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
+          <PolarGrid stroke="#3f3f46" />
+          <PolarAngleAxis dataKey="axis" tick={{ fontSize: 10, fill: "#a1a1aa" }} />
+          <Tooltip
+            contentStyle={RADAR_TOOLTIP_STYLE}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const d = payload[0]?.payload as { axis: string; detail: string } | undefined;
+              if (!d) return null;
+              return (
+                <div style={RADAR_TOOLTIP_STYLE} className="px-3 py-2">
+                  <div className="text-zinc-300 font-medium">{d.axis}</div>
+                  <div className="text-zinc-400 mt-0.5">{d.detail}</div>
+                </div>
+              );
+            }}
+          />
+          <Radar
+            dataKey="value"
+            stroke="#3b82f6"
+            fill="#3b82f6"
+            fillOpacity={0.2}
+            strokeWidth={2}
+          />
+        </RadarChart>
+      </ResponsiveContainer>
+    </div>
+  );
 }
 
 function buildMergedDailyData(
@@ -299,6 +506,7 @@ function buildMergedDailyData(
       isSpike: spend > avgSpend * 2.5 && spend > 20,
       hasActivity: !!activity,
       agent_requests: activity?.agent_requests ?? 0,
+      usage_based_reqs: activity?.usage_based_reqs ?? 0,
       lines_added: activity?.lines_added ?? 0,
       lines_deleted: activity?.lines_deleted ?? 0,
       total_accepts: activity?.total_accepts ?? 0,
@@ -324,10 +532,10 @@ function KpiCard({
     <div
       className={`bg-zinc-900 border rounded-md px-3 py-2 min-w-0 flex-1 ${alert ? "border-red-500/50" : "border-zinc-800"}`}
     >
-      <div className="text-[10px] text-zinc-500 truncate">{label}</div>
-      <div className="text-lg font-bold tracking-tight leading-tight">{value}</div>
+      <div className="text-[10px] text-zinc-400 truncate">{label}</div>
+      <div className="text-lg font-bold tracking-tight leading-tight text-zinc-100">{value}</div>
       {sub && (
-        <div className={`text-[10px] truncate ${alert ? "text-red-400" : "text-zinc-500"}`}>
+        <div className={`text-[10px] truncate ${alert ? "text-red-400" : "text-zinc-400"}`}>
           {sub}
         </div>
       )}

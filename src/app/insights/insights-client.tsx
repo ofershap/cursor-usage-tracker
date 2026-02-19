@@ -56,6 +56,10 @@ interface MCPEntry {
   tool_name: string;
   total_usage: number;
 }
+interface CommandsEntry {
+  command_name: string;
+  total_usage: number;
+}
 interface FileExtEntry {
   extension: string;
   total_files: number;
@@ -83,6 +87,22 @@ interface ModelEfficiencyEntry {
   cost_per_useful_line: number;
 }
 
+interface PlanExhaustionData {
+  summary: {
+    users_exhausted: number;
+    total_active: number;
+    avg_days: number;
+    median_days: number;
+    pct_exhausted: number;
+  };
+  users: Array<{
+    email: string;
+    name: string;
+    days_to_exhaust: number;
+    usage_based_reqs: number;
+  }>;
+}
+
 interface InsightsData {
   dau: DAUEntry[];
   modelSummary: ModelSummary[];
@@ -90,9 +110,11 @@ interface InsightsData {
   agentEdits: AgentEdits[];
   tabs: TabsEntry[];
   mcp: MCPEntry[];
+  commands: CommandsEntry[];
   fileExtensions: FileExtEntry[];
   clientVersions: VersionEntry[];
   modelEfficiency: ModelEfficiencyEntry[];
+  planExhaustion: PlanExhaustionData;
 }
 
 import { formatDateTick, formatDateLabel } from "@/lib/date-utils";
@@ -119,27 +141,10 @@ function fmt(n: number): string {
 
 export function InsightsClient({ data }: { data: InsightsData }) {
   const dauSummary = useMemo(() => {
-    if (!data.dau.length) return { avgDau: 0, peakDau: 0, weekdayAvg: 0, weekendAvg: 0 };
+    if (!data.dau.length) return { avgDau: 0, peakDau: 0 };
     const avg = Math.round(data.dau.reduce((s, d) => s + d.dau, 0) / data.dau.length);
     const peak = Math.max(...data.dau.map((d) => d.dau));
-    const weekdays = data.dau.filter((d) => {
-      const day = new Date(d.date).getDay();
-      return day > 0 && day < 6;
-    });
-    const weekends = data.dau.filter((d) => {
-      const day = new Date(d.date).getDay();
-      return day === 0 || day === 6;
-    });
-    return {
-      avgDau: avg,
-      peakDau: peak,
-      weekdayAvg: weekdays.length
-        ? Math.round(weekdays.reduce((s, d) => s + d.dau, 0) / weekdays.length)
-        : 0,
-      weekendAvg: weekends.length
-        ? Math.round(weekends.reduce((s, d) => s + d.dau, 0) / weekends.length)
-        : 0,
-    };
+    return { avgDau: avg, peakDau: peak };
   }, [data.dau]);
 
   const modelShareData = useMemo(() => {
@@ -170,11 +175,24 @@ export function InsightsClient({ data }: { data: InsightsData }) {
   const totalTabLines = data.tabs.reduce((s, d) => s + d.lines_accepted, 0);
   const totalMessages = data.modelSummary.reduce((s, d) => s + d.total_messages, 0);
 
+  const mergedCommands = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of data.commands) {
+      const name = c.command_name.replace(/\.md$/, "");
+      map.set(name, (map.get(name) ?? 0) + c.total_usage);
+    }
+    return [...map.entries()]
+      .map(([command_name, total_usage]) => ({ command_name, total_usage }))
+      .sort((a, b) => b.total_usage - a.total_usage);
+  }, [data.commands]);
+
+  const totalCommands = mergedCommands.reduce((s, d) => s + d.total_usage, 0);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-sm font-semibold text-zinc-200">Team Insights</h1>
-        <span className="text-[10px] text-zinc-500">Last 30 days · Analytics API</span>
+        <span className="text-[10px] text-zinc-400">Last 30 days · Analytics API</span>
       </div>
 
       {/* KPI Strip */}
@@ -184,19 +202,24 @@ export function InsightsClient({ data }: { data: InsightsData }) {
           value={dauSummary.avgDau.toString()}
           sub={`Peak: ${dauSummary.peakDau}`}
         />
-        <MiniKpi label="AI Messages" value={fmt(totalMessages)} sub="30d total" />
+        <MiniKpi label="Commands" value={fmt(totalCommands)} sub="30d total" />
         <MiniKpi label="Agent Lines" value={fmt(totalAgentLines)} sub="accepted" />
         <MiniKpi label="Tab Lines" value={fmt(totalTabLines)} sub="accepted" />
         <MiniKpi label="MCP Tools" value={data.mcp.length.toString()} sub="unique tools" />
       </div>
 
+      {/* Plan Exhaustion (compact) */}
+      {data.planExhaustion.summary.users_exhausted > 0 && (
+        <PlanExhaustionSection data={data.planExhaustion} />
+      )}
+
       {/* Model Cost vs Value */}
       {data.modelEfficiency.length > 0 && <ModelEfficiencySection data={data.modelEfficiency} />}
 
-      {/* Row 1: DAU + Model Adoption */}
+      {/* Charts Row: DAU + Model Adoption */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <ChartCard title="Daily Active Users — by Usage Type">
-          <ResponsiveContainer width="100%" height={200}>
+        <ChartCard title="Daily Active Users - by Usage Type">
+          <ResponsiveContainer width="100%" height={180}>
             <AreaChart data={data.dau}>
               <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
               <XAxis
@@ -242,7 +265,7 @@ export function InsightsClient({ data }: { data: InsightsData }) {
         </ChartCard>
 
         <ChartCard title="Model Adoption Share (%)">
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={180}>
             <AreaChart data={modelShareData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
               <XAxis
@@ -302,12 +325,10 @@ export function InsightsClient({ data }: { data: InsightsData }) {
         </ChartCard>
       </div>
 
-      {/* Agent Edits + Tab Completions removed — low signal, not actionable */}
-
-      {/* Row 3: Model Breakdown Table + MCP Tools */}
+      {/* Tables Row: Model Breakdown + MCP Tools */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <ChartCard title="Model Usage Breakdown (30d)">
-          <div className="overflow-y-auto max-h-[220px]">
+          <div className="overflow-y-auto max-h-[200px]">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-zinc-900">
                 <tr className="text-zinc-500 border-b border-zinc-800">
@@ -349,8 +370,81 @@ export function InsightsClient({ data }: { data: InsightsData }) {
           </div>
         </ChartCard>
 
+        <ChartCard title="Top File Extensions (by AI Lines Accepted)">
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={data.fileExtensions.slice(0, 8)} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+              <XAxis type="number" tick={{ fontSize: 10, fill: "#71717a" }} tickFormatter={fmt} />
+              <YAxis
+                type="category"
+                dataKey="extension"
+                tick={{ fontSize: 10, fill: "#71717a" }}
+                width={35}
+                tickFormatter={(v: string) => `.${v}`}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "#18181b",
+                  border: "1px solid #3f3f46",
+                  borderRadius: "6px",
+                  fontSize: "11px",
+                }}
+                formatter={((v: number) => [fmt(v ?? 0), "Lines"]) as never}
+              />
+              <Bar dataKey="total_lines_accepted" name="Lines Accepted" radius={[0, 4, 4, 0]}>
+                {data.fileExtensions.slice(0, 8).map((_, i) => (
+                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+
+      {/* Adoption Row: Commands + MCP Tools */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <ChartCard title="Commands Adoption (Top 20)">
+          <div className="overflow-y-auto max-h-[200px]">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-zinc-900">
+                <tr className="text-zinc-500 border-b border-zinc-800">
+                  <th className="text-left py-1 font-medium">Command</th>
+                  <th className="text-right py-1 font-medium">Total Usage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mergedCommands.slice(0, 20).map((row, i) => (
+                  <tr
+                    key={row.command_name}
+                    className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
+                  >
+                    <td className="py-1 text-zinc-300 font-mono">{row.command_name}</td>
+                    <td className="text-right py-1">
+                      <div className="flex items-center justify-end gap-1">
+                        <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.min(
+                                (row.total_usage / (mergedCommands[0]?.total_usage || 1)) * 100,
+                                100,
+                              )}%`,
+                              backgroundColor: COLORS[i % COLORS.length],
+                            }}
+                          />
+                        </div>
+                        <span className="font-mono">{fmt(row.total_usage)}</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </ChartCard>
+
         <ChartCard title="MCP Tool Adoption (Top 20)">
-          <div className="overflow-y-auto max-h-[220px]">
+          <div className="overflow-y-auto max-h-[200px]">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-zinc-900">
                 <tr className="text-zinc-500 border-b border-zinc-800">
@@ -389,20 +483,25 @@ export function InsightsClient({ data }: { data: InsightsData }) {
         </ChartCard>
       </div>
 
-      {/* Row 4: File Extensions + Client Versions */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <ChartCard title="Top File Extensions (by AI Lines Accepted)">
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={data.fileExtensions.slice(0, 8)} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-              <XAxis type="number" tick={{ fontSize: 10, fill: "#71717a" }} tickFormatter={fmt} />
-              <YAxis
-                type="category"
-                dataKey="extension"
-                tick={{ fontSize: 10, fill: "#71717a" }}
-                width={35}
-                tickFormatter={(v: string) => `.${v}`}
-              />
+      {/* Client Versions - compact */}
+      <ChartCard title="Client Versions (Latest Day)">
+        <div className="flex gap-4">
+          <ResponsiveContainer width={160} height={160}>
+            <PieChart>
+              <Pie
+                data={data.clientVersions.slice(0, 6)}
+                dataKey="user_count"
+                nameKey="version"
+                cx="50%"
+                cy="50%"
+                outerRadius={55}
+                innerRadius={25}
+                paddingAngle={2}
+              >
+                {data.clientVersions.slice(0, 6).map((_, i) => (
+                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                ))}
+              </Pie>
               <Tooltip
                 contentStyle={{
                   backgroundColor: "#18181b",
@@ -410,73 +509,155 @@ export function InsightsClient({ data }: { data: InsightsData }) {
                   borderRadius: "6px",
                   fontSize: "11px",
                 }}
-                formatter={((v: number) => [fmt(v ?? 0), "Lines"]) as never}
+                formatter={
+                  ((v: number, _: string, entry: { payload: VersionEntry }) => [
+                    `${v ?? 0} users (${entry.payload.percentage.toFixed(0)}%)`,
+                    entry.payload.version,
+                  ]) as never
+                }
               />
-              <Bar dataKey="total_lines_accepted" name="Lines Accepted" radius={[0, 4, 4, 0]}>
-                {data.fileExtensions.slice(0, 8).map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
+            </PieChart>
           </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Client Versions (Latest Day)">
-          <div className="flex gap-3">
-            <ResponsiveContainer width="50%" height={200}>
-              <PieChart>
-                <Pie
-                  data={data.clientVersions.slice(0, 6)}
-                  dataKey="user_count"
-                  nameKey="version"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={60}
-                  innerRadius={30}
-                  paddingAngle={2}
-                >
-                  {data.clientVersions.slice(0, 6).map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#18181b",
-                    border: "1px solid #3f3f46",
-                    borderRadius: "6px",
-                    fontSize: "11px",
-                  }}
-                  formatter={
-                    ((v: number, _: string, entry: { payload: VersionEntry }) => [
-                      `${v ?? 0} users (${entry.payload.percentage.toFixed(0)}%)`,
-                      entry.payload.version,
-                    ]) as never
-                  }
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="flex-1 overflow-y-auto max-h-[200px]">
-              <table className="w-full text-xs">
-                <tbody>
-                  {data.clientVersions.map((v, i) => (
-                    <tr key={v.version} className="border-b border-zinc-800/30">
-                      <td className="py-1">
-                        <span
-                          className="inline-block w-2 h-2 rounded-full mr-1.5"
-                          style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                        />
-                        <span className="font-mono text-zinc-300">{v.version}</span>
-                      </td>
-                      <td className="text-right py-1 text-zinc-400">{v.user_count}</td>
-                      <td className="text-right py-1 text-zinc-500">{v.percentage.toFixed(0)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <div className="flex-1 overflow-y-auto max-h-[160px]">
+            <table className="w-full text-xs">
+              <tbody>
+                {data.clientVersions.map((v, i) => (
+                  <tr key={v.version} className="border-b border-zinc-800/30">
+                    <td className="py-1">
+                      <span
+                        className="inline-block w-2 h-2 rounded-full mr-1.5"
+                        style={{ backgroundColor: COLORS[i % COLORS.length] }}
+                      />
+                      <span className="font-mono text-zinc-300">{v.version}</span>
+                    </td>
+                    <td className="text-right py-1 text-zinc-400">{v.user_count}</td>
+                    <td className="text-right py-1 text-zinc-500">{v.percentage.toFixed(0)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </ChartCard>
+        </div>
+      </ChartCard>
+    </div>
+  );
+}
+
+function PlanExhaustionSection({ data }: { data: PlanExhaustionData }) {
+  const [showUsers, setShowUsers] = useState(false);
+  const { summary, users } = data;
+  const cycleDay = new Date().getDate();
+
+  const buckets = useMemo(() => {
+    const b = [
+      { label: "Day 1-3", min: 1, max: 3, count: 0, color: "#ef4444" },
+      { label: "Day 4-7", min: 4, max: 7, count: 0, color: "#f59e0b" },
+      { label: "Day 8-14", min: 8, max: 14, count: 0, color: "#3b82f6" },
+      { label: "Day 15+", min: 15, max: 999, count: 0, color: "#10b981" },
+    ];
+    for (const u of users) {
+      const bucket = b.find((bb) => u.days_to_exhaust >= bb.min && u.days_to_exhaust <= bb.max);
+      if (bucket) bucket.count++;
+    }
+    return b.filter((bb) => bb.count > 0);
+  }, [users]);
+
+  return (
+    <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xs font-semibold text-zinc-200">Plan Exhaustion</h2>
+          <p className="text-[10px] text-zinc-400 mt-0.5">
+            Day {cycleDay} of billing cycle - how fast are users exceeding their included plan?
+          </p>
+        </div>
+        <button
+          onClick={() => setShowUsers((v) => !v)}
+          className="flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+        >
+          <svg
+            className={`w-3 h-3 transition-transform ${showUsers ? "rotate-90" : ""}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+          {showUsers ? "Hide" : "Show"} users
+        </button>
       </div>
+
+      <div className="flex items-stretch gap-2 overflow-x-auto">
+        <MiniKpi
+          label="Exceeded"
+          value={`${summary.users_exhausted}/${summary.total_active}`}
+          sub={`${summary.pct_exhausted}% of active`}
+        />
+        <MiniKpi label="Avg Days" value={summary.avg_days.toFixed(1)} sub="to exceed" />
+        <MiniKpi label="Median" value={summary.median_days.toString()} sub="days" />
+        <div className="w-px bg-zinc-800 shrink-0 my-1" />
+        {buckets.map((b) => (
+          <div
+            key={b.label}
+            className="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 min-w-0 flex-1"
+          >
+            <div className="flex items-center gap-1.5">
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: b.color }}
+              />
+              <span className="text-[10px] text-zinc-400 truncate">{b.label}</span>
+            </div>
+            <div className="text-lg font-bold tracking-tight leading-tight text-zinc-100">
+              {b.count}
+            </div>
+            <div className="text-[10px] text-zinc-400">users</div>
+          </div>
+        ))}
+      </div>
+
+      {showUsers && (
+        <div className="overflow-y-auto max-h-[250px] border-t border-zinc-800 pt-2">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-zinc-900">
+              <tr className="text-zinc-500 border-b border-zinc-800">
+                <th className="text-left py-1 font-medium">User</th>
+                <th className="text-right py-1 font-medium">Day Exceeded</th>
+                <th className="text-right py-1 font-medium">Extra Requests</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => {
+                const dayColor =
+                  u.days_to_exhaust <= 3
+                    ? "text-red-400"
+                    : u.days_to_exhaust <= 7
+                      ? "text-orange-300"
+                      : "text-zinc-300";
+                return (
+                  <tr key={u.email} className="border-b border-zinc-800/30 hover:bg-zinc-800/30">
+                    <td className="py-1">
+                      <a
+                        href={`/users/${encodeURIComponent(u.email)}`}
+                        className="text-zinc-300 hover:text-blue-400"
+                      >
+                        {u.name || u.email}
+                      </a>
+                    </td>
+                    <td className={`text-right py-1 font-mono font-bold ${dayColor}`}>
+                      Day {u.days_to_exhaust}
+                    </td>
+                    <td className="text-right py-1 font-mono text-zinc-400">
+                      {u.usage_based_reqs.toLocaleString()}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -489,12 +670,7 @@ function ModelEfficiencySection({ data }: { data: ModelEfficiencyEntry[] }) {
     .map((d) => ({
       model: shortModel(d.model),
       fullModel: d.model,
-      useful: d.useful_lines_per_req,
-      wasted: d.wasted_lines_per_req,
-      precision_pct: d.precision_pct,
-      rejection_rate: d.rejection_rate,
       cost_per_req: d.cost_per_req,
-      cost_per_useful_line: d.cost_per_useful_line,
       users: d.users,
       total_spend_usd: d.total_spend_usd,
       total_reqs: d.total_reqs,
@@ -504,9 +680,15 @@ function ModelEfficiencySection({ data }: { data: ModelEfficiencyEntry[] }) {
     model.replace(" thinking", " (T)").replace(" think-fast", " (TF)");
 
   const bySpend = [...qualified].sort((a, b) => b.total_spend_usd - a.total_spend_usd).slice(0, 5);
-  const byValue = [...qualified].sort((a, b) => b.precision_pct - a.precision_pct).slice(0, 5);
-  const byWaste = [...qualified].sort((a, b) => a.precision_pct - b.precision_pct).slice(0, 5);
-  const chartData = [...qualified].sort((a, b) => b.precision_pct - a.precision_pct);
+  const byCheapest = [...qualified]
+    .filter((d) => d.cost_per_req > 0)
+    .sort((a, b) => a.cost_per_req - b.cost_per_req)
+    .slice(0, 5);
+  const byExpensive = [...qualified]
+    .filter((d) => d.cost_per_req > 0)
+    .sort((a, b) => b.cost_per_req - a.cost_per_req)
+    .slice(0, 5);
+  const chartData = [...qualified].sort((a, b) => a.cost_per_req - b.cost_per_req);
 
   const maxSpend = bySpend[0]?.total_spend_usd ?? 1;
 
@@ -515,7 +697,7 @@ function ModelEfficiencySection({ data }: { data: ModelEfficiencyEntry[] }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-zinc-200">Model Rankings</h2>
-          <p className="text-[10px] text-zinc-500 mt-0.5">Models with $30+ spend · Last 30 days</p>
+          <p className="text-[10px] text-zinc-400 mt-0.5">Models with $30+ spend · Last 30 days</p>
         </div>
         <button
           onClick={() => setShowDetail((v) => !v)}
@@ -554,31 +736,38 @@ function ModelEfficiencySection({ data }: { data: ModelEfficiencyEntry[] }) {
           }))}
         />
         <RankingCard
-          title="Best Precision"
-          subtitle="% of AI output kept by devs"
+          title="Most Cost Efficient"
+          subtitle="Lowest cost per request"
           icon="🎯"
-          items={byValue.map((d) => ({
-            label: d.model,
-            fullName: d.fullModel,
-            value: `${d.precision_pct}%`,
-            sub: `$${d.cost_per_req}/req · ${d.useful} lines kept/req`,
-            pct: d.precision_pct / 100,
-            color:
-              d.precision_pct >= 40 ? "#10b981" : d.precision_pct >= 25 ? "#3b82f6" : "#f59e0b",
-          }))}
+          items={byCheapest.map((d) => {
+            const maxCpr = byCheapest[byCheapest.length - 1]?.cost_per_req ?? 1;
+            return {
+              label: d.model,
+              fullName: d.fullModel,
+              value: `$${d.cost_per_req}/req`,
+              sub: `${d.users} users · $${d.total_spend_usd.toLocaleString()} total`,
+              pct: 1 - d.cost_per_req / (maxCpr || 1),
+              color:
+                d.cost_per_req < 0.1 ? "#10b981" : d.cost_per_req < 0.3 ? "#3b82f6" : "#f59e0b",
+            };
+          })}
         />
         <RankingCard
-          title="Most Wasteful"
-          subtitle="Lowest precision (most output thrown away)"
-          icon="🗑️"
-          items={byWaste.map((d) => ({
-            label: d.model,
-            fullName: d.fullModel,
-            value: `${d.precision_pct}%`,
-            sub: `${d.wasted} wasted lines/req · $${d.cost_per_req}/req`,
-            pct: 1 - d.precision_pct / 100,
-            color: d.precision_pct < 20 ? "#ef4444" : d.precision_pct < 30 ? "#f59e0b" : "#71717a",
-          }))}
+          title="Most Expensive"
+          subtitle="Highest cost per request"
+          icon="💰"
+          items={byExpensive.map((d) => {
+            const maxCpr = byExpensive[0]?.cost_per_req ?? 1;
+            return {
+              label: d.model,
+              fullName: d.fullModel,
+              value: `$${d.cost_per_req}/req`,
+              sub: `${d.users} users · $${d.total_spend_usd.toLocaleString()} total`,
+              pct: d.cost_per_req / (maxCpr || 1),
+              color:
+                d.cost_per_req >= 1 ? "#ef4444" : d.cost_per_req >= 0.5 ? "#f59e0b" : "#71717a",
+            };
+          })}
         />
       </div>
 
@@ -586,9 +775,8 @@ function ModelEfficiencySection({ data }: { data: ModelEfficiencyEntry[] }) {
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4 space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div>
-              <div className="text-[10px] text-zinc-500 mb-2 font-medium">
-                Lines per Request — <span className="text-emerald-500">Kept</span> vs{" "}
-                <span className="text-red-400">Thrown Away</span> · % = Precision
+              <div className="text-[10px] text-zinc-400 mb-2 font-medium">
+                Cost per Request by Model
               </div>
               <ResponsiveContainer width="100%" height={Math.max(chartData.length * 30, 120)}>
                 <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 60 }}>
@@ -609,92 +797,66 @@ function ModelEfficiencySection({ data }: { data: ModelEfficiencyEntry[] }) {
                       return (
                         <div className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs shadow-lg">
                           <div className="text-zinc-300 font-medium mb-1">{d.fullModel}</div>
-                          <div className="text-zinc-400 pl-2">
-                            <span className="text-emerald-400 font-mono">{d.useful}</span> lines
-                            kept/req
-                          </div>
-                          <div className="text-zinc-400 pl-2">
-                            <span className="text-red-400 font-mono">{d.wasted}</span> lines
-                            wasted/req
-                          </div>
-                          <div className="border-t border-zinc-800 mt-1 pt-1 text-zinc-400">
-                            Precision:{" "}
-                            <span
-                              className={`font-mono font-bold ${d.precision_pct >= 40 ? "text-emerald-400" : d.precision_pct >= 25 ? "text-blue-400" : "text-yellow-400"}`}
-                            >
-                              {d.precision_pct}%
-                            </span>
-                            {d.rejection_rate > 3 && (
-                              <>
-                                {" "}
-                                · Reject:{" "}
-                                <span className="text-red-400 font-mono">{d.rejection_rate}%</span>
-                              </>
-                            )}
+                          <div className="text-zinc-400">
+                            <span className="font-mono font-bold text-zinc-200">
+                              ${d.cost_per_req}
+                            </span>{" "}
+                            per request
                           </div>
                           <div className="text-zinc-500 mt-1">
-                            ${d.cost_per_req}/req · {d.users} users · $
+                            {d.users} users · {d.total_reqs.toLocaleString()} reqs · $
                             {d.total_spend_usd.toLocaleString()} total
                           </div>
                         </div>
                       );
                     }}
                   />
-                  <Bar
-                    dataKey="useful"
-                    stackId="a"
-                    name="Kept"
-                    fill="#10b981"
-                    radius={[0, 0, 0, 0]}
-                  />
-                  <Bar
-                    dataKey="wasted"
-                    stackId="a"
-                    name="Thrown away"
-                    fill="#ef4444"
-                    fillOpacity={0.4}
-                    radius={[0, 4, 4, 0]}
-                  >
+                  <Bar dataKey="cost_per_req" name="$/req" radius={[0, 4, 4, 0]}>
+                    {chartData.map((d, i) => (
+                      <Cell
+                        key={i}
+                        fill={
+                          d.cost_per_req >= 1
+                            ? "#ef4444"
+                            : d.cost_per_req >= 0.3
+                              ? "#f59e0b"
+                              : "#10b981"
+                        }
+                        fillOpacity={0.7}
+                      />
+                    ))}
                     <LabelList
-                      dataKey="precision_pct"
+                      dataKey="cost_per_req"
                       position="right"
-                      formatter={(v) => `${v ?? ""}%`}
+                      formatter={(v) => `$${v ?? ""}`}
                       style={{ fontSize: 10, fill: "#a1a1aa", fontFamily: "monospace" }}
                     />
                   </Bar>
-                  <Legend wrapperStyle={{ fontSize: "10px" }} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
 
             <div>
-              <div className="text-[10px] text-zinc-500 mb-2 font-medium">Full Model Scorecard</div>
+              <div className="text-[10px] text-zinc-400 mb-2 font-medium">Full Model Scorecard</div>
               <div className="overflow-y-auto max-h-[280px]">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-zinc-900">
                     <tr className="text-zinc-500 border-b border-zinc-800">
                       <th className="text-left py-1 font-medium">Model</th>
                       <th className="text-right py-1 font-medium">$/req</th>
-                      <th className="text-right py-1 font-medium">Kept/req</th>
-                      <th className="text-right py-1 font-medium">Waste/req</th>
-                      <th className="text-right py-1 font-medium">Precision</th>
+                      <th className="text-right py-1 font-medium">Users</th>
+                      <th className="text-right py-1 font-medium">Reqs</th>
                       <th className="text-right py-1 font-medium">Total $</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.map((row) => {
-                      const precisionColor =
-                        row.precision_pct >= 40
-                          ? "text-emerald-400"
-                          : row.precision_pct >= 25
-                            ? "text-blue-400"
-                            : "text-yellow-400";
                       const costColor =
-                        row.cost_per_req >= 0.5
+                        row.cost_per_req >= 1
                           ? "text-red-400"
-                          : row.cost_per_req >= 0.2
+                          : row.cost_per_req >= 0.3
                             ? "text-orange-300"
-                            : "text-zinc-300";
+                            : "text-emerald-400";
                       return (
                         <tr
                           key={row.model}
@@ -706,17 +868,12 @@ function ModelEfficiencySection({ data }: { data: ModelEfficiencyEntry[] }) {
                           >
                             {shortModel(row.model)}
                           </td>
-                          <td className={`text-right py-0.5 font-mono ${costColor}`}>
+                          <td className={`text-right py-0.5 font-mono font-bold ${costColor}`}>
                             ${row.cost_per_req}
                           </td>
-                          <td className="text-right py-0.5 font-mono text-emerald-400">
-                            {row.useful_lines_per_req}
-                          </td>
-                          <td className="text-right py-0.5 font-mono text-red-400/60">
-                            {row.wasted_lines_per_req}
-                          </td>
-                          <td className={`text-right py-0.5 font-mono font-bold ${precisionColor}`}>
-                            {row.precision_pct}%
+                          <td className="text-right py-0.5 font-mono text-zinc-400">{row.users}</td>
+                          <td className="text-right py-0.5 font-mono text-zinc-400">
+                            {row.total_reqs.toLocaleString()}
                           </td>
                           <td className="text-right py-0.5 font-mono text-zinc-400">
                             ${row.total_spend_usd.toLocaleString()}
@@ -759,7 +916,7 @@ function RankingCard({
         <span className="text-base leading-none">{icon}</span>
         <div>
           <div className="text-xs font-semibold text-zinc-200">{title}</div>
-          <div className="text-[10px] text-zinc-500">{subtitle}</div>
+          <div className="text-[10px] text-zinc-400">{subtitle}</div>
         </div>
       </div>
       <div className="space-y-2.5">
@@ -791,7 +948,7 @@ function RankingCard({
                     }}
                   />
                 </div>
-                <span className="text-[10px] text-zinc-500 shrink-0">{item.sub}</span>
+                <span className="text-[10px] text-zinc-400 shrink-0">{item.sub}</span>
               </div>
             </div>
           </div>
@@ -804,7 +961,7 @@ function RankingCard({
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-      <h3 className="text-xs font-medium text-zinc-500 mb-3">{title}</h3>
+      <h3 className="text-xs font-medium text-zinc-400 mb-3">{title}</h3>
       {children}
     </div>
   );
@@ -813,9 +970,9 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 function MiniKpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 min-w-0 flex-1">
-      <div className="text-[10px] text-zinc-500 truncate">{label}</div>
-      <div className="text-lg font-bold tracking-tight leading-tight">{value}</div>
-      {sub && <div className="text-[10px] text-zinc-500 truncate">{sub}</div>}
+      <div className="text-[10px] text-zinc-400 truncate">{label}</div>
+      <div className="text-lg font-bold tracking-tight leading-tight text-zinc-100">{value}</div>
+      {sub && <div className="text-[10px] text-zinc-400 truncate">{sub}</div>}
     </div>
   );
 }

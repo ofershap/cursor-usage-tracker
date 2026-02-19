@@ -38,7 +38,7 @@ export function SpendBarChart({ data, highlightEmail }: SpendBarChartProps) {
 
   return (
     <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-      <h3 className="text-xs font-medium text-zinc-500 mb-2">Top Spenders (Current Cycle)</h3>
+      <h3 className="text-xs font-medium text-zinc-400 mb-2">Top Spenders (Current Cycle)</h3>
       <ResponsiveContainer width="100%" height={240}>
         <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 50 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />

@@ -13,9 +13,23 @@ import {
 } from "recharts";
 import { formatDateTick, formatDateLabel } from "@/lib/date-utils";
 
+interface SpendDataPoint {
+  date: string;
+  spend_cents: number;
+  agent_requests?: number;
+  lines_added?: number;
+  lines_deleted?: number;
+}
+
 interface SpendTrendChartProps {
-  data: Array<{ date: string; spend_cents: number }>;
+  data: Array<SpendDataPoint>;
   selectedDays?: number;
+}
+
+function fmtDollars(v: number): string {
+  if (v === 0) return "$0";
+  if (v < 1) return `$${v.toFixed(2)}`;
+  return `$${v >= 1000 ? `${(v / 1000).toFixed(1)}K` : Math.round(v)}`;
 }
 
 const TOOLTIP_STYLE = {
@@ -39,7 +53,15 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
     const prevSpend = i > 0 ? (data[i - 1]?.spend_cents ?? 0) / 100 : spend;
     const change = spend - prevSpend;
     const changePct = prevSpend > 0 ? (change / prevSpend) * 100 : 0;
-    return { date: d.date, spend, change, changePct };
+    return {
+      date: d.date,
+      spend,
+      change,
+      changePct,
+      requests: d.agent_requests,
+      linesAdded: d.lines_added,
+      linesDeleted: d.lines_deleted,
+    };
   });
 
   const avg = chartData.reduce((s, d) => s + d.spend, 0) / chartData.length;
@@ -55,18 +77,20 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
   return (
     <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
       <div className="flex items-baseline gap-2 mb-2">
-        <h3 className="text-xs font-medium text-zinc-500">Daily Spend</h3>
+        <h3 className="text-xs font-medium text-zinc-400">Daily Spend</h3>
         <span className="text-[10px] text-zinc-600">{data.length} days of data</span>
       </div>
       <ResponsiveContainer width="100%" height={200}>
         <AreaChart data={chartData} margin={{ left: 0, right: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-          <XAxis dataKey="date" stroke="#71717a" fontSize={11} tickFormatter={formatDateTick} />
-          <YAxis
+          <XAxis
+            dataKey="date"
             stroke="#71717a"
             fontSize={11}
-            tickFormatter={(v: number) => `$${v >= 1000 ? `${(v / 1000).toFixed(1)}K` : v}`}
+            tickFormatter={formatDateTick}
+            interval={chartData.length <= 14 ? 0 : Math.floor(chartData.length / 10)}
           />
+          <YAxis stroke="#71717a" fontSize={11} tickFormatter={fmtDollars} />
           <Tooltip
             contentStyle={TOOLTIP_STYLE}
             labelStyle={{ color: "#a1a1aa" }}
@@ -84,17 +108,41 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
                     {formatDateLabel(String(label))}
                     {!isInRange && <span className="text-zinc-600 ml-1">(context)</span>}
                   </div>
-                  <div className="font-mono font-bold text-sm">${pt.spend.toFixed(0)}</div>
+                  <div className="font-mono font-bold text-sm">{fmtDollars(pt.spend)}</div>
                   {pt.change !== 0 && (
                     <div style={{ color: changeColor }} className="font-mono text-[11px]">
-                      {changeSign}${pt.change.toFixed(0)} ({changeSign}
-                      {pt.changePct.toFixed(0)}% vs prev day)
+                      {changeSign}
+                      {pt.changePct.toFixed(0)}% vs prev day
+                    </div>
+                  )}
+                  {(pt.requests != null || pt.linesAdded != null) && (
+                    <div className="mt-1.5 pt-1.5 border-t border-zinc-700/50 flex flex-col gap-0.5 text-[11px] text-zinc-400">
+                      {pt.requests != null && (
+                        <div>
+                          <span className="text-zinc-500">Requests:</span>{" "}
+                          <span className="font-mono text-zinc-300">
+                            {pt.requests.toLocaleString()}
+                          </span>
+                        </div>
+                      )}
+                      {pt.linesAdded != null && (
+                        <div>
+                          <span className="text-zinc-500">Lines:</span>{" "}
+                          <span className="font-mono text-emerald-400">
+                            +{pt.linesAdded.toLocaleString()}
+                          </span>
+                          {pt.linesDeleted != null && pt.linesDeleted > 0 && (
+                            <span className="font-mono text-red-400">
+                              {" "}
+                              -{pt.linesDeleted.toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                   {Math.abs(pt.changePct) > 100 && (
-                    <div className="text-amber-400 text-[10px] mt-1">
-                      ⚠ Spike detected — check Daily Spend by User chart below
-                    </div>
+                    <div className="text-amber-400 text-[10px] mt-1">⚠ Spike detected</div>
                   )}
                 </div>
               );
@@ -115,7 +163,7 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
             strokeDasharray="4 4"
             strokeWidth={1}
             label={{
-              value: `avg $${avg.toFixed(0)}`,
+              value: `avg ${fmtDollars(avg)}`,
               position: "right",
               fill: "#f59e0b",
               fontSize: 10,

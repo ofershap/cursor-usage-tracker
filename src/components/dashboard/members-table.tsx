@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { RankedUser } from "@/lib/db";
+import type { RankedUser, UsageBadge, SpendBadge } from "@/lib/db";
 import type { SortColumn } from "@/app/dashboard-client";
 import { shortModel } from "@/lib/format-utils";
 
@@ -21,7 +21,59 @@ function rankBadge(rank: number) {
   return `#${rank}`;
 }
 
-function SortIcon({ active, asc }: { col?: string; active: boolean; asc: boolean }) {
+function ordinal(n: number) {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
+const USAGE_BADGE_CONFIG: Record<UsageBadge, { label: string; color: string; tooltip: string }> = {
+  "power-user": {
+    label: "Power User",
+    color: "bg-purple-600/20 text-purple-400",
+    tooltip: "High request volume per active day",
+  },
+  "deep-thinker": {
+    label: "Deep Thinker",
+    color: "bg-amber-600/20 text-amber-400",
+    tooltip: "Uses max-context models (1M tokens) for deep, complex work",
+  },
+  balanced: {
+    label: "Balanced",
+    color: "bg-zinc-600/20 text-zinc-400",
+    tooltip: "Moderate usage with standard models",
+  },
+  "tab-completer": {
+    label: "Tab Completer",
+    color: "bg-cyan-600/20 text-cyan-400",
+    tooltip: "Heavy use of tab completions alongside agent requests",
+  },
+  "light-user": {
+    label: "Light",
+    color: "bg-zinc-700/20 text-zinc-500",
+    tooltip: "Fewer than 10 agent requests in this period",
+  },
+};
+
+const SPEND_BADGE_CONFIG: Record<SpendBadge, { label: string; color: string; tooltip: string }> = {
+  "cost-efficient": {
+    label: "Cost Efficient",
+    color: "bg-emerald-600/20 text-emerald-400",
+    tooltip: "Top 20% in requests with below-median cost per request",
+  },
+  "premium-model": {
+    label: "Premium Model",
+    color: "bg-amber-600/20 text-amber-400",
+    tooltip: "Uses expensive model tier (thinking/max) - primary cost driver",
+  },
+  "over-budget": {
+    label: "Over Budget",
+    color: "bg-red-600/20 text-red-400",
+    tooltip: "Spend is 5x+ above team median",
+  },
+};
+
+function SortIcon({ active, asc }: { active: boolean; asc: boolean }) {
   if (!active) return <span className="text-zinc-700 ml-0.5">↕</span>;
   return <span className="text-blue-400 ml-0.5">{asc ? "↑" : "↓"}</span>;
 }
@@ -63,7 +115,7 @@ export function MembersTable({
                 className="text-left px-4 py-3 font-medium cursor-pointer hover:text-zinc-300 select-none"
                 onClick={() => onSort("name")}
               >
-                Name <SortIcon col="name" active={sortCol === "name"} asc={sortAsc} />
+                Name <SortIcon active={sortCol === "name"} asc={sortAsc} />
               </th>
               <th className="text-left px-4 py-3 font-medium">Email</th>
               <th
@@ -71,31 +123,50 @@ export function MembersTable({
                 onClick={() => onSort("spend")}
               >
                 <span title="Full billing cycle spend">Spend (cycle)</span>
-                <SortIcon col="spend" active={sortCol === "spend"} asc={sortAsc} />
+                <SortIcon active={sortCol === "spend"} asc={sortAsc} />
               </th>
               <th
                 className="text-right px-4 py-3 font-medium cursor-pointer hover:text-zinc-300 select-none"
                 onClick={() => onSort("reqs")}
               >
                 <span title={`Agent requests in the last ${timeLabel}`}>Reqs ({timeLabel})</span>
-                <SortIcon col="reqs" active={sortCol === "reqs"} asc={sortAsc} />
+                <SortIcon active={sortCol === "reqs"} asc={sortAsc} />
               </th>
               <th
                 className="text-right px-4 py-3 font-medium cursor-pointer hover:text-zinc-300 select-none"
                 onClick={() => onSort("lines")}
               >
-                <span title={`Lines added in the last ${timeLabel}`}>Lines ({timeLabel})</span>
-                <SortIcon col="lines" active={sortCol === "lines"} asc={sortAsc} />
+                <span
+                  title={`Total lines added in editor — includes AI, manual typing, paste, refactoring (last ${timeLabel})`}
+                >
+                  Lines ({timeLabel})
+                </span>
+                <SortIcon active={sortCol === "lines"} asc={sortAsc} />
               </th>
               <th
                 className="text-right px-4 py-3 font-medium cursor-pointer hover:text-zinc-300 select-none"
                 onClick={() => onSort("cpr")}
               >
                 <span title="Cost per agent request (cycle spend / total requests)">$/req</span>
-                <SortIcon col="cpr" active={sortCol === "cpr"} asc={sortAsc} />
+                <SortIcon active={sortCol === "cpr"} asc={sortAsc} />
               </th>
               <th className="text-right px-4 py-3 font-medium">Model</th>
-              <th className="text-center px-4 py-3 font-medium">Ranks</th>
+              <th className="text-center px-4 py-3 font-medium">
+                <span
+                  title="Usage style and spend profile based on request patterns, model choice, and cost"
+                  className="cursor-help border-b border-dashed border-zinc-600"
+                >
+                  Profile
+                </span>
+              </th>
+              <th className="text-center px-4 py-3 font-medium">
+                <span
+                  title="$N = Spend rank (by billing cycle spend) · AN = Activity rank (by agent requests)"
+                  className="cursor-help border-b border-dashed border-zinc-600"
+                >
+                  Ranks
+                </span>
+              </th>
               <th className="text-right px-4 py-3 font-medium w-10"></th>
             </tr>
           </thead>
@@ -154,16 +225,36 @@ export function MembersTable({
                     {shortModel(row.most_used_model)}
                   </td>
                   <td className="text-center px-4 py-2.5">
+                    <div className="flex items-center justify-center gap-1 flex-wrap">
+                      {row.usage_badge && (
+                        <span
+                          className={`${USAGE_BADGE_CONFIG[row.usage_badge].color} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap`}
+                          title={USAGE_BADGE_CONFIG[row.usage_badge].tooltip}
+                        >
+                          {USAGE_BADGE_CONFIG[row.usage_badge].label}
+                        </span>
+                      )}
+                      {row.spend_badge && (
+                        <span
+                          className={`${SPEND_BADGE_CONFIG[row.spend_badge].color} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap`}
+                          title={SPEND_BADGE_CONFIG[row.spend_badge].tooltip}
+                        >
+                          {SPEND_BADGE_CONFIG[row.spend_badge].label}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="text-center px-4 py-2.5">
                     <div className="flex items-center justify-center gap-1.5">
                       <span
                         className="bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-mono"
-                        title="Spend rank"
+                        title={`${ordinal(row.spend_rank)} highest spender this billing cycle`}
                       >
                         ${row.spend_rank}
                       </span>
                       <span
                         className="bg-green-600/20 text-green-400 px-1.5 py-0.5 rounded text-[10px] font-mono"
-                        title="Activity rank"
+                        title={`${ordinal(row.activity_rank)} most active by agent requests`}
                       >
                         A{row.activity_rank}
                       </span>
