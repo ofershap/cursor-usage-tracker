@@ -133,7 +133,7 @@ export class CursorClient {
   }> {
     const allMembers: MemberSpend[] = [];
     let cycleStart: string | undefined;
-    let limitedUsersCount = 0;
+    let limitedUsersCount: number;
     let page = 1;
 
     while (true) {

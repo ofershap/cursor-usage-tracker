@@ -1105,7 +1105,7 @@ function assignBadges(
     spendingCprs.length > 0 ? (spendingCprs[Math.floor(spendingCprs.length * 0.5)] ?? 0) : 0;
 
   return users.map((u) => {
-    let usage_badge: UsageBadge | null = null;
+    let usage_badge: UsageBadge | null;
     let spend_badge: SpendBadge | null = null;
 
     if (u.agent_requests < 10) {
