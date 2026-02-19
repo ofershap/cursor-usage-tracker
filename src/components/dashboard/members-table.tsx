@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import type { RankedUser, UsageBadge, SpendBadge } from "@/lib/db";
+import { useState, useRef, useEffect } from "react";
+import type { RankedUser, UsageBadge, SpendBadge, ContextBadge } from "@/lib/db";
 import type { SortColumn } from "@/app/dashboard-client";
 import { shortModel } from "@/lib/format-utils";
 
@@ -12,6 +13,8 @@ interface MembersTableProps {
   onSort: (col: SortColumn) => void;
   highlightEmail?: string;
   timeLabel: string;
+  badgeFilter: string | null;
+  onBadgeFilter: (badge: string | null) => void;
 }
 
 function rankBadge(rank: number) {
@@ -73,9 +76,115 @@ const SPEND_BADGE_CONFIG: Record<SpendBadge, { label: string; color: string; too
   },
 };
 
+const CONTEXT_BADGE_CONFIG: Record<
+  ContextBadge,
+  { label: string; color: string; tooltip: string }
+> = {
+  "long-sessions": {
+    label: "Long Sessions",
+    color: "bg-orange-600/20 text-orange-400",
+    tooltip: "Avg context >700K tokens/req — long conversations inflate cost per request",
+  },
+  "short-sessions": {
+    label: "Short Sessions",
+    color: "bg-teal-600/20 text-teal-400",
+    tooltip: "Avg context <300K tokens/req — efficient conversation patterns, low context overhead",
+  },
+};
+
 function SortIcon({ active, asc }: { active: boolean; asc: boolean }) {
   if (!active) return <span className="text-zinc-700 ml-0.5">↕</span>;
   return <span className="text-blue-400 ml-0.5">{asc ? "↑" : "↓"}</span>;
+}
+
+function BadgeLegend({
+  badgeFilter,
+  onBadgeFilter,
+}: {
+  badgeFilter: string | null;
+  onBadgeFilter: (badge: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  function handleBadgeClick(key: string) {
+    onBadgeFilter(badgeFilter === key ? null : key);
+    setOpen(false);
+  }
+
+  function renderBadgeItem(key: string, cfg: { label: string; color: string; tooltip: string }) {
+    const isActive = badgeFilter === key;
+    return (
+      <button
+        key={key}
+        onClick={() => handleBadgeClick(key)}
+        className={`w-full text-left rounded px-2 py-1 transition-colors cursor-pointer ${isActive ? "bg-blue-500/20 ring-1 ring-blue-500/40" : "bg-zinc-800/50 hover:bg-zinc-700/50"}`}
+      >
+        <span className={`${cfg.color} px-1.5 py-0.5 rounded text-[10px] font-medium`}>
+          {cfg.label}
+        </span>
+        <div className="text-[9px] text-zinc-500 mt-0.5 leading-snug">{cfg.tooltip}</div>
+      </button>
+    );
+  }
+
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full border border-zinc-600 text-zinc-500 hover:text-zinc-300 hover:border-zinc-400 transition-colors text-[9px] leading-none font-medium cursor-pointer"
+        aria-label="Badge legend"
+      >
+        i
+      </button>
+      {open && (
+        <div className="absolute right-0 top-6 z-50 w-80 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-2 text-left">
+          <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1">
+            Usage
+          </div>
+          <div className="space-y-0.5">
+            {(
+              Object.entries(USAGE_BADGE_CONFIG) as [
+                UsageBadge,
+                (typeof USAGE_BADGE_CONFIG)[UsageBadge],
+              ][]
+            ).map(([key, cfg]) => renderBadgeItem(key, cfg))}
+          </div>
+          <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mt-2 mb-1">
+            Spend
+          </div>
+          <div className="space-y-0.5">
+            {(
+              Object.entries(SPEND_BADGE_CONFIG) as [
+                SpendBadge,
+                (typeof SPEND_BADGE_CONFIG)[SpendBadge],
+              ][]
+            ).map(([key, cfg]) => renderBadgeItem(key, cfg))}
+          </div>
+          <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mt-2 mb-1">
+            Context
+          </div>
+          <div className="space-y-0.5">
+            {(
+              Object.entries(CONTEXT_BADGE_CONFIG) as [
+                ContextBadge,
+                (typeof CONTEXT_BADGE_CONFIG)[ContextBadge],
+              ][]
+            ).map(([key, cfg]) => renderBadgeItem(key, cfg))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function MembersTable({
@@ -85,6 +194,8 @@ export function MembersTable({
   onSort,
   highlightEmail,
   timeLabel,
+  badgeFilter,
+  onBadgeFilter,
 }: MembersTableProps) {
   const sortLabel =
     sortCol === "spend"
@@ -97,14 +208,41 @@ export function MembersTable({
             ? "Lines"
             : sortCol === "cpr"
               ? "$/req"
-              : "Name";
+              : sortCol === "context"
+                ? "Context"
+                : "Name";
+
+  const activeBadgeCfg = badgeFilter
+    ? (USAGE_BADGE_CONFIG[badgeFilter as UsageBadge] ??
+      SPEND_BADGE_CONFIG[badgeFilter as SpendBadge] ??
+      CONTEXT_BADGE_CONFIG[badgeFilter as ContextBadge])
+    : null;
 
   return (
     <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-      <div className="px-6 py-4 border-b border-zinc-800">
-        <h3 className="text-sm font-medium text-zinc-400">
-          All Members — sorted by {sortLabel} {sortAsc ? "↑" : "↓"}
-        </h3>
+      <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-medium text-zinc-400">
+            All Members — sorted by {sortLabel} {sortAsc ? "↑" : "↓"}
+          </h3>
+          {badgeFilter && activeBadgeCfg && (
+            <span className="flex items-center gap-1">
+              <span
+                className={`${activeBadgeCfg.color} px-1.5 py-0.5 rounded text-[10px] font-medium`}
+              >
+                {activeBadgeCfg.label}
+              </span>
+              <button
+                onClick={() => onBadgeFilter(null)}
+                className="text-zinc-500 hover:text-zinc-300 text-xs cursor-pointer"
+                title="Clear badge filter"
+              >
+                ✕
+              </button>
+            </span>
+          )}
+        </div>
+        <BadgeLegend badgeFilter={badgeFilter} onBadgeFilter={onBadgeFilter} />
       </div>
       <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
         <table className="w-full text-sm">
@@ -240,6 +378,14 @@ export function MembersTable({
                           title={SPEND_BADGE_CONFIG[row.spend_badge].tooltip}
                         >
                           {SPEND_BADGE_CONFIG[row.spend_badge].label}
+                        </span>
+                      )}
+                      {row.context_badge && (
+                        <span
+                          className={`${CONTEXT_BADGE_CONFIG[row.context_badge].color} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap`}
+                          title={CONTEXT_BADGE_CONFIG[row.context_badge].tooltip}
+                        >
+                          {CONTEXT_BADGE_CONFIG[row.context_badge].label}
                         </span>
                       )}
                     </div>

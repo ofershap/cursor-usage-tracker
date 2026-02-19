@@ -8,6 +8,7 @@ import {
   getAnalyticsCommandsSummary,
   getAnalyticsFileExtensionsSummary,
   getAnalyticsClientVersionsSummary,
+  getUsersByClientVersion,
   getModelEfficiency,
   getPlanExhaustionStats,
 } from "@/lib/db";
@@ -27,6 +28,7 @@ export default function InsightsPage() {
       commands: getAnalyticsCommandsSummary(30),
       fileExtensions: getAnalyticsFileExtensionsSummary(30),
       clientVersions: getAnalyticsClientVersionsSummary(),
+      versionUsers: getUsersByClientVersion(),
       modelEfficiency: getModelEfficiency(),
       planExhaustion: getPlanExhaustionStats(),
     };

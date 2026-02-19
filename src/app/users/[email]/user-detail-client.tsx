@@ -13,6 +13,7 @@ import { SpendTrendChart } from "@/components/charts/spend-trend-chart";
 import { formatDateShort } from "@/lib/date-utils";
 import { shortModel } from "@/lib/format-utils";
 import type { Anomaly } from "@/lib/types";
+import type { UsageBadge, SpendBadge, ContextBadge } from "@/lib/db";
 
 interface UserStats {
   member:
@@ -54,6 +55,21 @@ interface UserStats {
   commandsSummary: Array<{ command_name: string; total_usage: number }>;
   ranks: { spendRank: number; activityRank: number; totalRanked: number } | null;
   group: { id: string; name: string } | null;
+  contextMetrics: {
+    avgCacheRead: number;
+    avgCacheWrite: number;
+    totalRequests: number;
+    teamAvgCacheRead: number;
+    teamMedianCacheRead: number;
+    contextRank: number;
+    totalRanked: number;
+    contextBadge: ContextBadge | null;
+  } | null;
+  badges: {
+    usage: UsageBadge | null;
+    spend: SpendBadge | null;
+    context: ContextBadge | null;
+  };
 }
 
 interface UserDetailClientProps {
@@ -66,6 +82,65 @@ function fmt(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
 }
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  return n.toLocaleString();
+}
+
+const BADGE_STYLES: Record<string, { label: string; color: string; tooltip: string }> = {
+  "power-user": {
+    label: "Power User",
+    color: "bg-purple-600/20 text-purple-400",
+    tooltip: "High request volume per active day",
+  },
+  "deep-thinker": {
+    label: "Deep Thinker",
+    color: "bg-amber-600/20 text-amber-400",
+    tooltip: "Uses max-context models",
+  },
+  balanced: {
+    label: "Balanced",
+    color: "bg-zinc-600/20 text-zinc-400",
+    tooltip: "Moderate usage with standard models",
+  },
+  "tab-completer": {
+    label: "Tab Completer",
+    color: "bg-cyan-600/20 text-cyan-400",
+    tooltip: "Heavy tab completions",
+  },
+  "light-user": {
+    label: "Light",
+    color: "bg-zinc-700/20 text-zinc-500",
+    tooltip: "Fewer than 10 agent requests",
+  },
+  "cost-efficient": {
+    label: "Cost Efficient",
+    color: "bg-emerald-600/20 text-emerald-400",
+    tooltip: "Top 20% requests, below-median $/req",
+  },
+  "premium-model": {
+    label: "Premium Model",
+    color: "bg-amber-600/20 text-amber-400",
+    tooltip: "Expensive model tier (thinking/max)",
+  },
+  "over-budget": {
+    label: "Over Budget",
+    color: "bg-red-600/20 text-red-400",
+    tooltip: "Spend 5x+ above team median",
+  },
+  "long-sessions": {
+    label: "Long Sessions",
+    color: "bg-orange-600/20 text-orange-400",
+    tooltip: "Avg context >700K tokens/req — long conversations inflate cost",
+  },
+  "short-sessions": {
+    label: "Short Sessions",
+    color: "bg-teal-600/20 text-teal-400",
+    tooltip: "Avg context <300K tokens/req — efficient conversation patterns",
+  },
+};
 
 export function UserDetailClient({ email, stats }: UserDetailClientProps) {
   const currentSpend = stats.spending[0];
@@ -89,6 +164,11 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
   const mergedDailyData = buildMergedDailyData(stats.dailySpend, stats.dailyActivity);
   const hasUsageEvents = stats.usageEventsSummary.length > 0;
 
+  const userBadges: string[] = [];
+  if (stats.badges.spend) userBadges.push(stats.badges.spend);
+  if (stats.badges.context) userBadges.push(stats.badges.context);
+  if (stats.badges.usage) userBadges.push(stats.badges.usage);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
@@ -96,7 +176,22 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
           ← Back
         </Link>
         <div>
-          <h1 className="text-lg font-bold">{stats.member?.name ?? email}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-bold">{stats.member?.name ?? email}</h1>
+            {userBadges.map((b) => {
+              const cfg = BADGE_STYLES[b];
+              if (!cfg) return null;
+              return (
+                <span
+                  key={b}
+                  className={`${cfg.color} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap`}
+                  title={cfg.tooltip}
+                >
+                  {cfg.label}
+                </span>
+              );
+            })}
+          </div>
           <p className="text-zinc-500 text-xs">
             {email} · {stats.member?.role ?? "member"}
             {stats.group && (
@@ -300,6 +395,8 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
           </div>
         </div>
       )}
+
+      {stats.contextMetrics && <ContextEfficiencyCard metrics={stats.contextMetrics} />}
 
       {stats.modelBreakdown.length > 0 && (
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
@@ -511,6 +608,71 @@ interface MergedDay {
   tabs_accepted: number;
   most_used_model: string;
   client_version: string;
+}
+
+function ContextEfficiencyCard({ metrics }: { metrics: NonNullable<UserStats["contextMetrics"]> }) {
+  const ratio =
+    metrics.teamMedianCacheRead > 0 ? metrics.avgCacheRead / metrics.teamMedianCacheRead : 0;
+  const isHigh = metrics.avgCacheRead > 700_000;
+  const isMedium = metrics.avgCacheRead > 400_000;
+
+  const color = isHigh ? "text-orange-400" : isMedium ? "text-amber-400" : "text-emerald-400";
+  const borderColor = isHigh ? "border-orange-500/30" : "border-zinc-800";
+  const bgColor = isHigh ? "bg-orange-500/5" : "bg-zinc-900";
+
+  let description: string;
+  if (isHigh) {
+    description =
+      "High context usage directly increases avg $/req — each request re-reads the full conversation history.";
+  } else if (isMedium) {
+    description = "Moderate context usage — avg $/req is partially driven by conversation length.";
+  } else {
+    description = "Low context usage — minimal impact on $/req from conversation history.";
+  }
+
+  return (
+    <div className={`${bgColor} rounded-lg border ${borderColor} px-4 py-3`}>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-medium text-zinc-400">Context Efficiency</h3>
+        <span className="text-[10px] text-zinc-500">
+          #{metrics.contextRank} of {metrics.totalRanked} in org
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-4 mb-2">
+        <div>
+          <div className="text-[10px] text-zinc-500">Avg Cache Read / Req</div>
+          <div className={`text-sm font-bold font-mono ${color}`}>
+            {fmtTokens(metrics.avgCacheRead)}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] text-zinc-500">Org Median</div>
+          <div className="text-sm font-mono text-zinc-400">
+            {fmtTokens(metrics.teamMedianCacheRead)}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] text-zinc-500">vs Org</div>
+          <div className={`text-sm font-mono ${color}`}>
+            {ratio > 0 ? `${ratio.toFixed(1)}x` : "—"}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full ${isHigh ? "bg-orange-500" : isMedium ? "bg-amber-500" : "bg-emerald-500"}`}
+            style={{
+              width: `${metrics.totalRanked > 0 ? Math.round(((metrics.totalRanked - metrics.contextRank + 1) / metrics.totalRanked) * 100) : 0}%`,
+            }}
+          />
+        </div>
+      </div>
+      <p className={`text-[11px] mt-2 ${isHigh ? "text-orange-400/80" : "text-zinc-500"}`}>
+        {description}
+      </p>
+    </div>
+  );
 }
 
 const RADAR_TOOLTIP_STYLE = {

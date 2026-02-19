@@ -823,6 +823,8 @@ export type UsageBadge =
 
 export type SpendBadge = "cost-efficient" | "premium-model" | "over-budget";
 
+export type ContextBadge = "long-sessions" | "short-sessions";
+
 export interface RankedUser {
   rank: number;
   email: string;
@@ -838,8 +840,10 @@ export interface RankedUser {
   active_days: number;
   tabs_accepted: number;
   tabs_shown: number;
+  avg_cache_read: number;
   usage_badge: UsageBadge | null;
   spend_badge: SpendBadge | null;
+  context_badge: ContextBadge | null;
 }
 
 export interface DashboardStats {
@@ -960,6 +964,12 @@ export function getFullDashboard(days: number = 7): FullDashboard {
             WHERE date(timestamp/1000, 'unixepoch') >= date('now', ?)
             GROUP BY user_email
           ),
+          user_cache AS (
+            SELECT user_email as email, ROUND(AVG(cache_read_tokens)) as avg_cache_read
+            FROM usage_events
+            WHERE date(timestamp/1000, 'unixepoch') >= date('now', ?) AND cache_read_tokens > 0
+            GROUP BY user_email
+          ),
           activity AS (
             SELECT email,
               SUM(agent_requests) as agent_requests,
@@ -982,10 +992,12 @@ export function getFullDashboard(days: number = 7): FullDashboard {
             COALESCE(a.active_days, 0) as active_days,
             COALESCE(a.tabs_accepted, 0) as tabs_accepted,
             COALESCE(a.tabs_shown, 0) as tabs_shown,
+            COALESCE(uc.avg_cache_read, 0) as avg_cache_read,
             RANK() OVER (ORDER BY COALESCE(us.spend_cents, 0) DESC) as spend_rank,
             RANK() OVER (ORDER BY COALESCE(a.agent_requests, 0) DESC) as activity_rank
           FROM members m
           LEFT JOIN user_spend us ON m.email = us.email
+          LEFT JOIN user_cache uc ON m.email = uc.email
           LEFT JOIN activity a ON m.email = a.email
           WHERE m.is_removed = 0 AND (COALESCE(us.spend_cents, 0) > 0 OR COALESCE(a.agent_requests, 0) > 0)
           ORDER BY COALESCE(us.spend_cents, 0) DESC`
@@ -1021,6 +1033,7 @@ export function getFullDashboard(days: number = 7): FullDashboard {
             COALESCE(a.active_days, 0) as active_days,
             COALESCE(a.tabs_accepted, 0) as tabs_accepted,
             COALESCE(a.tabs_shown, 0) as tabs_shown,
+            0 as avg_cache_read,
             RANK() OVER (ORDER BY COALESCE(us.spend_cents, 0) DESC) as spend_rank,
             RANK() OVER (ORDER BY COALESCE(a.agent_requests, 0) DESC) as activity_rank
           FROM members m
@@ -1029,7 +1042,9 @@ export function getFullDashboard(days: number = 7): FullDashboard {
           WHERE m.is_removed = 0 AND (COALESCE(us.spend_cents, 0) > 0 OR COALESCE(a.agent_requests, 0) > 0)
           ORDER BY COALESCE(us.spend_cents, 0) DESC`,
     )
-    .all(dateFilter, dateFilter) as Array<{
+    .all(
+      ...(hasUsageEvents ? [dateFilter, dateFilter, dateFilter] : [dateFilter, dateFilter]),
+    ) as Array<{
     email: string;
     name: string;
     spend_cents: number;
@@ -1041,6 +1056,7 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     active_days: number;
     tabs_accepted: number;
     tabs_shown: number;
+    avg_cache_read: number;
     spend_rank: number;
     activity_rank: number;
   }>;
@@ -1191,6 +1207,7 @@ function assignBadges(
     active_days: number;
     tabs_accepted: number;
     tabs_shown: number;
+    avg_cache_read: number;
     spend_rank: number;
     activity_rank: number;
   }>,
@@ -1198,6 +1215,7 @@ function assignBadges(
   (typeof users)[number] & {
     usage_badge: UsageBadge | null;
     spend_badge: SpendBadge | null;
+    context_badge: ContextBadge | null;
   }
 > {
   const activeUsers = users.filter((u) => u.agent_requests >= 30);
@@ -1218,9 +1236,12 @@ function assignBadges(
   const medianCpr =
     spendingCprs.length > 0 ? (spendingCprs[Math.floor(spendingCprs.length * 0.5)] ?? 0) : 0;
 
+  const LONG_SESSION_THRESHOLD = 700_000;
+
   return users.map((u) => {
     let usage_badge: UsageBadge | null;
     let spend_badge: SpendBadge | null = null;
+    let context_badge: ContextBadge | null = null;
 
     if (u.agent_requests < 10) {
       usage_badge = "light-user";
@@ -1253,8 +1274,142 @@ function assignBadges(
       }
     }
 
-    return { ...u, usage_badge, spend_badge };
+    const SHORT_SESSION_THRESHOLD = 300_000;
+    if (u.agent_requests >= 30 && u.avg_cache_read > LONG_SESSION_THRESHOLD) {
+      context_badge = "long-sessions";
+    } else if (
+      u.agent_requests >= 30 &&
+      u.avg_cache_read > 0 &&
+      u.avg_cache_read < SHORT_SESSION_THRESHOLD
+    ) {
+      context_badge = "short-sessions";
+    }
+
+    const allBadges: Array<{ type: "context" | "spend" | "usage"; priority: number }> = [];
+    if (spend_badge === "over-budget") allBadges.push({ type: "spend", priority: 0 });
+    if (context_badge) allBadges.push({ type: "context", priority: 1 });
+    if (spend_badge === "premium-model") allBadges.push({ type: "spend", priority: 2 });
+    if (spend_badge === "cost-efficient") allBadges.push({ type: "spend", priority: 3 });
+    if (usage_badge && usage_badge !== "balanced" && usage_badge !== "light-user")
+      allBadges.push({ type: "usage", priority: 4 });
+    if (usage_badge === "balanced") allBadges.push({ type: "usage", priority: 5 });
+    if (usage_badge === "light-user") allBadges.push({ type: "usage", priority: 6 });
+
+    allBadges.sort((a, b) => a.priority - b.priority);
+    const kept = new Set(allBadges.slice(0, 2).map((b) => b.type));
+
+    return {
+      ...u,
+      usage_badge: kept.has("usage") ? usage_badge : null,
+      spend_badge: kept.has("spend") ? spend_badge : null,
+      context_badge: kept.has("context") ? context_badge : null,
+    };
   });
+}
+
+export function getUserBadges(
+  email: string,
+  days: number = 30,
+): { usage: UsageBadge | null; spend: SpendBadge | null; context: ContextBadge | null } {
+  const db = getDb();
+  const dateFilter = `-${days} days`;
+
+  const userRow = db
+    .prepare(
+      `SELECT SUM(agent_requests) as agent_requests, SUM(lines_added) as lines_added,
+        SUM(tabs_accepted) as tabs_accepted, SUM(total_tabs_shown) as tabs_shown,
+        COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days,
+        MAX(most_used_model) as most_used_model
+       FROM daily_usage WHERE email = ? AND date >= date('now', ?) AND is_active = 1`,
+    )
+    .get(email, dateFilter) as
+    | {
+        agent_requests: number;
+        lines_added: number;
+        tabs_accepted: number;
+        tabs_shown: number;
+        active_days: number;
+        most_used_model: string;
+      }
+    | undefined;
+
+  if (!userRow || !userRow.agent_requests) {
+    return { usage: null, spend: null, context: null };
+  }
+
+  const spendRow = db
+    .prepare(
+      `SELECT COALESCE(ROUND(SUM(total_cents)), 0) as spend_cents
+       FROM usage_events WHERE user_email = ? AND date(timestamp/1000, 'unixepoch') >= date('now', ?)`,
+    )
+    .get(email, dateFilter) as { spend_cents: number };
+
+  const teamStats = db
+    .prepare(
+      `SELECT email, SUM(agent_requests) as reqs, COALESCE(us.spend, 0) as spend
+       FROM daily_usage du
+       LEFT JOIN (
+         SELECT user_email, ROUND(SUM(total_cents)) as spend
+         FROM usage_events WHERE date(timestamp/1000, 'unixepoch') >= date('now', ?)
+         GROUP BY user_email
+       ) us ON du.email = us.user_email
+       WHERE du.date >= date('now', ?) AND du.is_active = 1
+       GROUP BY du.email HAVING SUM(agent_requests) >= 30`,
+    )
+    .all(dateFilter, dateFilter) as Array<{ email: string; reqs: number; spend: number }>;
+
+  const spendValues = teamStats
+    .filter((t) => t.spend > 0)
+    .map((t) => t.spend)
+    .sort((a, b) => a - b);
+  const medianSpend =
+    spendValues.length > 0 ? (spendValues[Math.floor(spendValues.length / 2)] ?? 0) : 0;
+  const cprValues = teamStats
+    .filter((t) => t.spend > 0 && t.reqs > 0)
+    .map((t) => t.spend / t.reqs)
+    .sort((a, b) => a - b);
+  const medianCpr = cprValues.length > 0 ? (cprValues[Math.floor(cprValues.length / 2)] ?? 0) : 0;
+  const reqValues = teamStats.map((t) => t.reqs).sort((a, b) => a - b);
+  const p80Reqs = reqValues[Math.floor(reqValues.length * 0.8)] ?? 0;
+
+  let usage: UsageBadge | null;
+  if (userRow.agent_requests < 10) {
+    usage = "light-user";
+  } else {
+    const reqsPerDay = userRow.active_days > 0 ? userRow.agent_requests / userRow.active_days : 0;
+    const tabRatio =
+      userRow.agent_requests > 0 ? userRow.tabs_accepted / userRow.agent_requests : 0;
+    if (tabRatio > 1.5) usage = "tab-completer";
+    else if (isMaxModel(userRow.most_used_model)) usage = "deep-thinker";
+    else if (reqsPerDay >= 80) usage = "power-user";
+    else usage = "balanced";
+  }
+
+  let spend: SpendBadge | null = null;
+  if (userRow.agent_requests >= 30 && spendRow.spend_cents > 0) {
+    const cpr = spendRow.spend_cents / userRow.agent_requests;
+    if (spendRow.spend_cents > medianSpend * 5 && spendRow.spend_cents > 10000) {
+      spend = "over-budget";
+    } else if (isMaxModel(userRow.most_used_model) && medianCpr > 0 && cpr > medianCpr * 3) {
+      spend = "premium-model";
+    } else if (userRow.agent_requests >= p80Reqs && medianCpr > 0 && cpr <= medianCpr * 0.5) {
+      spend = "cost-efficient";
+    }
+  }
+
+  const cacheRow = db
+    .prepare(
+      `SELECT ROUND(AVG(cache_read_tokens)) as avg_cr FROM usage_events
+       WHERE user_email = ? AND date(timestamp/1000, 'unixepoch') >= date('now', ?) AND cache_read_tokens > 0`,
+    )
+    .get(email, dateFilter) as { avg_cr: number | null } | undefined;
+
+  let context: ContextBadge | null = null;
+  const avgCr = cacheRow?.avg_cr ?? 0;
+  if (userRow.agent_requests >= 30 && avgCr > 700_000) context = "long-sessions";
+  else if (userRow.agent_requests >= 30 && avgCr > 0 && avgCr < 300_000) context = "short-sessions";
+
+  return { usage, spend, context };
 }
 
 export function getDashboardStats(days: number = 7): DashboardStats {
@@ -1320,6 +1475,8 @@ export function getUserStats(email: string, days: number = 7) {
   const usageEventsSummary = getUserUsageEventsSummary(email, days);
   const mcpSummary = getUserMCPSummary(email, days);
   const commandsSummary = getUserCommandsSummary(email, days);
+  const contextMetrics = getUserContextMetrics(email, days);
+  const badges = getUserBadges(email, days);
 
   const ranksRow = db
     .prepare(
@@ -1385,6 +1542,8 @@ export function getUserStats(email: string, days: number = 7) {
         }
       : null,
     group: groupRow ?? null,
+    contextMetrics,
+    badges,
   };
 }
 
@@ -1805,6 +1964,33 @@ export function getAnalyticsClientVersionsSummary(): Array<{
     .all() as Array<{ version: string; user_count: number; percentage: number }>;
 }
 
+export function getUsersByClientVersion(): Record<string, Array<{ email: string; name: string }>> {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `
+    WITH latest_version AS (
+      SELECT email, client_version, ROW_NUMBER() OVER (PARTITION BY email ORDER BY date DESC) as rn
+      FROM daily_usage
+      WHERE client_version IS NOT NULL AND client_version != ''
+    )
+    SELECT lv.client_version as version, lv.email, COALESCE(m.name, lv.email) as name
+    FROM latest_version lv
+    LEFT JOIN members m ON m.email = lv.email
+    WHERE lv.rn = 1
+    ORDER BY lv.client_version, m.name
+  `,
+    )
+    .all() as Array<{ version: string; email: string; name: string }>;
+
+  const result: Record<string, Array<{ email: string; name: string }>> = {};
+  for (const row of rows) {
+    const arr = (result[row.version] ??= []);
+    arr.push({ email: row.email, name: row.name });
+  }
+  return result;
+}
+
 export interface ModelEfficiency {
   model: string;
   users: number;
@@ -1980,6 +2166,76 @@ export function getUserUsageEventsSummary(
     overage_cost_cents: number;
     error_reqs: number;
   }>;
+}
+
+export interface UserContextMetrics {
+  avgCacheRead: number;
+  avgCacheWrite: number;
+  totalRequests: number;
+  teamAvgCacheRead: number;
+  teamMedianCacheRead: number;
+  contextRank: number;
+  totalRanked: number;
+  contextBadge: ContextBadge | null;
+}
+
+export function getUserContextMetrics(email: string, days: number = 30): UserContextMetrics | null {
+  const db = getDb();
+  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+
+  const userRow = db
+    .prepare(
+      `SELECT ROUND(AVG(cache_read_tokens)) as avg_cr, ROUND(AVG(cache_write_tokens)) as avg_cw,
+        COUNT(*) as reqs
+       FROM usage_events
+       WHERE user_email = ? AND CAST(timestamp AS INTEGER) >= ? AND cache_read_tokens > 0`,
+    )
+    .get(email, since) as
+    | { avg_cr: number | null; avg_cw: number | null; reqs: number }
+    | undefined;
+
+  if (!userRow || !userRow.reqs) return null;
+
+  const teamRows = db
+    .prepare(
+      `SELECT user_email, ROUND(AVG(cache_read_tokens)) as avg_cr
+       FROM usage_events
+       WHERE CAST(timestamp AS INTEGER) >= ? AND cache_read_tokens > 0
+       GROUP BY user_email
+       HAVING COUNT(*) >= 10
+       ORDER BY avg_cr`,
+    )
+    .all(since) as Array<{ user_email: string; avg_cr: number }>;
+
+  const teamAvgs = teamRows.map((r) => r.avg_cr).sort((a, b) => a - b);
+  const teamAvgCacheRead =
+    teamAvgs.length > 0 ? Math.round(teamAvgs.reduce((s, v) => s + v, 0) / teamAvgs.length) : 0;
+  const teamMedianCacheRead =
+    teamAvgs.length > 0 ? (teamAvgs[Math.floor(teamAvgs.length / 2)] ?? 0) : 0;
+
+  const userAvg = userRow.avg_cr ?? 0;
+  const contextRank = teamAvgs.filter((v) => v >= userAvg).length;
+  const totalRanked = teamAvgs.length;
+
+  const LONG_SESSION_THRESHOLD = 700_000;
+  const SHORT_SESSION_THRESHOLD = 300_000;
+  let contextBadge: ContextBadge | null = null;
+  if (userRow.reqs >= 30 && userAvg > LONG_SESSION_THRESHOLD) {
+    contextBadge = "long-sessions";
+  } else if (userRow.reqs >= 30 && userAvg > 0 && userAvg < SHORT_SESSION_THRESHOLD) {
+    contextBadge = "short-sessions";
+  }
+
+  return {
+    avgCacheRead: Math.round(userAvg),
+    avgCacheWrite: Math.round(userRow.avg_cw ?? 0),
+    totalRequests: userRow.reqs,
+    teamAvgCacheRead,
+    teamMedianCacheRead,
+    contextRank,
+    totalRanked,
+    contextBadge,
+  };
 }
 
 export function getUsageEventsLastTimestamp(): string | null {

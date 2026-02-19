@@ -45,7 +45,7 @@ function fmt(n: number): string {
   return n.toLocaleString();
 }
 
-export type SortColumn = "spend" | "activity" | "reqs" | "lines" | "cpr" | "name";
+export type SortColumn = "spend" | "activity" | "reqs" | "lines" | "cpr" | "name" | "context";
 
 interface SpendBreakdownRow {
   date: string;
@@ -72,6 +72,8 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   const [loading, setLoading] = useState(false);
   const [sortCol, setSortCol] = useState<SortColumn>("spend");
   const [sortAsc, setSortAsc] = useState(false);
+  const [badgeFilter, setBadgeFilter] = useState<string | null>(null);
+  const [preBadgeSortCol, setPreBadgeSortCol] = useState<SortColumn | null>(null);
   const [groups, setGroups] = useState<BillingGroupWithMembers[]>([]);
   const [selectedGroup, setSelectedGroup] = useState("all");
 
@@ -133,6 +135,36 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
     });
   }, []);
 
+  const BADGE_SORT_MAP: Record<string, SortColumn> = {
+    "long-sessions": "context",
+    "short-sessions": "context",
+    "over-budget": "spend",
+    "premium-model": "cpr",
+    "cost-efficient": "cpr",
+    "power-user": "reqs",
+    "tab-completer": "reqs",
+    "deep-thinker": "spend",
+    "light-user": "reqs",
+    balanced: "reqs",
+  };
+
+  const handleBadgeFilter = useCallback(
+    (badge: string | null) => {
+      if (badge) {
+        setPreBadgeSortCol(sortCol);
+        const targetSort = BADGE_SORT_MAP[badge] ?? "spend";
+        setSortCol(targetSort);
+        setSortAsc(badge === "short-sessions" || badge === "cost-efficient");
+      } else if (preBadgeSortCol) {
+        setSortCol(preBadgeSortCol);
+        setSortAsc(false);
+        setPreBadgeSortCol(null);
+      }
+      setBadgeFilter(badge);
+    },
+    [sortCol, preBadgeSortCol],
+  );
+
   const filteredUsers = useMemo(() => {
     let users = stats.rankedUsers;
     if (groupEmailSet) {
@@ -142,6 +174,14 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
       const q = search.toLowerCase();
       users = users.filter(
         (u) => u.email.toLowerCase().includes(q) || u.name.toLowerCase().includes(q),
+      );
+    }
+    if (badgeFilter) {
+      users = users.filter(
+        (u) =>
+          u.usage_badge === badgeFilter ||
+          u.spend_badge === badgeFilter ||
+          u.context_badge === badgeFilter,
       );
     }
     const sorted = [...users].sort((a, b) => {
@@ -162,12 +202,14 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
           const cprB = b.agent_requests > 0 ? b.spend_cents / b.agent_requests : 0;
           return (cprB - cprA) * flip;
         }
+        case "context":
+          return (b.avg_cache_read - a.avg_cache_read) * flip;
         default:
           return 0;
       }
     });
     return sorted;
-  }, [stats.rankedUsers, search, sortCol, sortAsc, groupEmailSet]);
+  }, [stats.rankedUsers, search, sortCol, sortAsc, groupEmailSet, badgeFilter]);
 
   const searchedUser = useMemo(() => {
     if (!search.trim()) return null;
@@ -193,7 +235,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   }
 
   const timeLabel = formatTimeLabel(days);
-  const isSearching = search.trim().length > 0 || selectedGroup !== "all";
+  const isSearching = search.trim().length > 0 || selectedGroup !== "all" || badgeFilter !== null;
   const totalLines = stats.dailyTeamActivity.reduce((s, d) => s + d.total_lines_added, 0);
   const effectiveDays = Math.min(days, stats.cycleDays);
   const cycleStartDate = new Date(stats.cycleStart);
@@ -387,14 +429,18 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
 
       {/* ── Row: Team Spend Trend + Model Cost Comparison ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <SpendTrendChart data={filteredTeamDailySpend} selectedDays={days} />
+        <SpendTrendChart
+          data={filteredTeamDailySpend}
+          selectedDays={days}
+          avgPerDay={filteredSpendCents / 100 / (effectiveDays || 1)}
+        />
         <ModelCostComparison data={data.modelCosts} />
       </div>
 
       {/* ── Charts ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <SpendBarChart data={filteredUsers.slice(0, 20)} highlightEmail={searchedUser?.email} />
-        <DailySpendChart data={dailySpendData} />
+        <DailySpendChart data={dailySpendData} onNameClick={(name) => setSearch(name)} />
       </div>
 
       {/* ── Table ── */}
@@ -405,6 +451,8 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
         onSort={handleSort}
         highlightEmail={searchedUser?.email}
         timeLabel={timeLabel}
+        badgeFilter={badgeFilter}
+        onBadgeFilter={handleBadgeFilter}
       />
     </div>
   );

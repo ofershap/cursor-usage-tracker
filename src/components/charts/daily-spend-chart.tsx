@@ -1,15 +1,6 @@
 "use client";
 
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-  Legend,
-} from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { DailySpendDataPoint } from "@/app/dashboard-client";
 import { formatDateTick, formatDateLabel } from "@/lib/date-utils";
 
@@ -18,9 +9,10 @@ const OTHERS_COLOR = "#52525b";
 
 interface DailySpendChartProps {
   data: { points: DailySpendDataPoint[]; topNames: string[] };
+  onNameClick?: (name: string) => void;
 }
 
-export function DailySpendChart({ data }: DailySpendChartProps) {
+export function DailySpendChart({ data, onNameClick }: DailySpendChartProps) {
   const { points, topNames } = data;
 
   if (!points.length) {
@@ -82,7 +74,6 @@ export function DailySpendChart({ data }: DailySpendChartProps) {
               );
             }}
           />
-          <Legend wrapperStyle={{ fontSize: 10 }} />
           {allKeys.map((key, i) => (
             <Bar
               key={key}
@@ -94,6 +85,24 @@ export function DailySpendChart({ data }: DailySpendChartProps) {
           ))}
         </BarChart>
       </ResponsiveContainer>
+      <div className="flex items-center justify-center gap-3 mt-1 flex-wrap">
+        {allKeys.map((key) => {
+          const isOthers = key === "Others";
+          const color = colorMap.get(key) ?? "#71717a";
+          return (
+            <button
+              key={key}
+              type="button"
+              disabled={isOthers}
+              onClick={() => !isOthers && onNameClick?.(key)}
+              className={`flex items-center gap-1.5 text-[10px] ${isOthers ? "text-zinc-500 cursor-default" : "text-zinc-300 hover:text-white cursor-pointer"}`}
+            >
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+              {key}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

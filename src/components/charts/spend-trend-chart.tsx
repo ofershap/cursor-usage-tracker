@@ -24,6 +24,7 @@ interface SpendDataPoint {
 interface SpendTrendChartProps {
   data: Array<SpendDataPoint>;
   selectedDays?: number;
+  avgPerDay?: number;
 }
 
 function fmtDollars(v: number): string {
@@ -39,7 +40,7 @@ const TOOLTIP_STYLE = {
   color: "#fafafa",
 } as const;
 
-export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
+export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendChartProps) {
   if (!data.length) {
     return (
       <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4 text-center text-zinc-500 text-sm">
@@ -70,16 +71,10 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
       ? chartData[chartData.length - provisionalDays]?.date
       : undefined;
 
-  const settledData = provisionalStart
-    ? chartData.filter((d) => d.date < provisionalStart)
-    : chartData;
-  const avg =
-    settledData.length > 0
-      ? settledData.reduce((s, d) => s + d.spend, 0) / settledData.length
-      : chartData.reduce((s, d) => s + d.spend, 0) / chartData.length;
-
   const cutoffDate =
     selectedDays && selectedDays < data.length ? data[data.length - selectedDays]?.date : undefined;
+
+  const avg = avgPerDay ?? chartData.reduce((s, d) => s + d.spend, 0) / (chartData.length || 1);
 
   const dimEndDate =
     cutoffDate && data.length > 0
@@ -134,6 +129,13 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
                       {pt.changePct.toFixed(0)}% vs prev day
                     </div>
                   )}
+                  <div className="font-mono text-[11px] text-amber-500/80">
+                    avg ${Math.round(avg).toLocaleString()}{" "}
+                    <span style={{ color: pt.spend > avg ? "#ef4444" : "#22c55e" }}>
+                      ({pt.spend > avg ? "+" : ""}
+                      {(((pt.spend - avg) / avg) * 100).toFixed(0)}%)
+                    </span>
+                  </div>
                   {(pt.requests != null || pt.linesAdded != null) && (
                     <div className="mt-1.5 pt-1.5 border-t border-zinc-700/50 flex flex-col gap-0.5 text-[11px] text-zinc-400">
                       {pt.requests != null && (
@@ -193,10 +195,11 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
             strokeDasharray="4 4"
             strokeWidth={1}
             label={{
-              value: `avg ${fmtDollars(avg)}`,
-              position: "right",
+              value: `avg $${Math.round(avg).toLocaleString()}`,
+              position: "insideTopRight",
               fill: "#f59e0b",
               fontSize: 10,
+              offset: 4,
             }}
           />
           <defs>

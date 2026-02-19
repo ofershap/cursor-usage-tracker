@@ -9,6 +9,7 @@ import {
   getAnalyticsCommandsSummary,
   getAnalyticsFileExtensionsSummary,
   getAnalyticsClientVersionsSummary,
+  getUsersByClientVersion,
   getPlanExhaustionStats,
 } from "@/lib/db";
 
@@ -29,6 +30,7 @@ export function GET(request: Request) {
       commands: getAnalyticsCommandsSummary(days),
       fileExtensions: getAnalyticsFileExtensionsSummary(days),
       clientVersions: getAnalyticsClientVersionsSummary(),
+      versionUsers: getUsersByClientVersion(),
       planExhaustion: getPlanExhaustionStats(),
     });
   } catch {

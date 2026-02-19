@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   AreaChart,
   Area,
@@ -71,6 +71,8 @@ interface VersionEntry {
   percentage: number;
 }
 
+type VersionUsers = Record<string, Array<{ email: string; name: string }>>;
+
 interface ModelEfficiencyEntry {
   model: string;
   users: number;
@@ -113,6 +115,7 @@ interface InsightsData {
   commands: CommandsEntry[];
   fileExtensions: FileExtEntry[];
   clientVersions: VersionEntry[];
+  versionUsers: VersionUsers;
   modelEfficiency: ModelEfficiencyEntry[];
   planExhaustion: PlanExhaustionData;
 }
@@ -484,62 +487,131 @@ export function InsightsClient({ data }: { data: InsightsData }) {
       </div>
 
       {/* Client Versions - compact */}
-      <ChartCard title="Client Versions (Latest Day)">
-        <div className="flex gap-4">
-          <ResponsiveContainer width={160} height={160}>
-            <PieChart>
-              <Pie
-                data={data.clientVersions.slice(0, 6)}
-                dataKey="user_count"
-                nameKey="version"
-                cx="50%"
-                cy="50%"
-                outerRadius={55}
-                innerRadius={25}
-                paddingAngle={2}
-              >
-                {data.clientVersions.slice(0, 6).map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#18181b",
-                  border: "1px solid #3f3f46",
-                  borderRadius: "6px",
-                  fontSize: "11px",
-                }}
-                formatter={
-                  ((v: number, _: string, entry: { payload: VersionEntry }) => [
-                    `${v ?? 0} users (${entry.payload.percentage.toFixed(0)}%)`,
-                    entry.payload.version,
-                  ]) as never
-                }
-              />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="flex-1 overflow-y-auto max-h-[160px]">
-            <table className="w-full text-xs">
-              <tbody>
-                {data.clientVersions.map((v, i) => (
-                  <tr key={v.version} className="border-b border-zinc-800/30">
-                    <td className="py-1">
-                      <span
-                        className="inline-block w-2 h-2 rounded-full mr-1.5"
-                        style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                      />
-                      <span className="font-mono text-zinc-300">{v.version}</span>
-                    </td>
-                    <td className="text-right py-1 text-zinc-400">{v.user_count}</td>
-                    <td className="text-right py-1 text-zinc-500">{v.percentage.toFixed(0)}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </ChartCard>
+      <ClientVersionsSection
+        clientVersions={data.clientVersions}
+        versionUsers={data.versionUsers}
+      />
     </div>
+  );
+}
+
+function ClientVersionsSection({
+  versionUsers,
+}: {
+  clientVersions: VersionEntry[];
+  versionUsers: VersionUsers;
+}) {
+  const [expandedVersion, setExpandedVersion] = useState<string | null>(null);
+
+  const versions = useMemo(() => {
+    const totalUsers = Object.values(versionUsers).reduce((sum, u) => sum + u.length, 0);
+    return Object.entries(versionUsers)
+      .map(([version, users]) => ({
+        version,
+        user_count: users.length,
+        percentage: totalUsers > 0 ? (users.length / totalUsers) * 100 : 0,
+        users,
+      }))
+      .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
+  }, [versionUsers]);
+
+  const latestVersion = versions[0]?.version;
+
+  return (
+    <ChartCard title="Client Versions">
+      <div className="flex gap-4">
+        <ResponsiveContainer width={160} height={160}>
+          <PieChart>
+            <Pie
+              data={versions.slice(0, 6)}
+              dataKey="user_count"
+              nameKey="version"
+              cx="50%"
+              cy="50%"
+              outerRadius={55}
+              innerRadius={25}
+              paddingAngle={2}
+            >
+              {versions.slice(0, 6).map((_, i) => (
+                <Cell key={i} fill={COLORS[i % COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "#18181b",
+                border: "1px solid #3f3f46",
+                borderRadius: "6px",
+                fontSize: "11px",
+              }}
+              formatter={
+                ((v: number, _: string, entry: { payload: (typeof versions)[number] }) => [
+                  `${v ?? 0} users (${entry.payload.percentage.toFixed(0)}%)`,
+                  entry.payload.version,
+                ]) as never
+              }
+            />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="flex-1 overflow-y-auto max-h-[400px]">
+          <table className="w-full text-xs">
+            <tbody>
+              {versions.map((v, i) => {
+                const isExpanded = expandedVersion === v.version;
+                const isLatest = v.version === latestVersion;
+                return (
+                  <React.Fragment key={v.version}>
+                    <tr
+                      className={`border-b border-zinc-800/30 cursor-pointer hover:bg-zinc-800/40 transition-colors ${isExpanded ? "bg-zinc-800/30" : ""}`}
+                      onClick={() => setExpandedVersion(isExpanded ? null : v.version)}
+                    >
+                      <td className="py-1">
+                        <span
+                          className="inline-block w-2 h-2 rounded-full mr-1.5"
+                          style={{ backgroundColor: COLORS[i % COLORS.length] }}
+                        />
+                        <span className="font-mono text-zinc-300">{v.version}</span>
+                        {isLatest && (
+                          <span className="ml-1.5 text-[10px] text-emerald-400 font-medium">
+                            latest
+                          </span>
+                        )}
+                      </td>
+                      <td className="text-right py-1 text-zinc-400">{v.user_count}</td>
+                      <td className="text-right py-1 text-zinc-500">{v.percentage.toFixed(0)}%</td>
+                      <td className="text-right py-1 pl-1 text-zinc-600 w-4">
+                        {v.users.length > 0 && (isExpanded ? "▾" : "▸")}
+                      </td>
+                    </tr>
+                    {isExpanded && v.users.length > 0 && (
+                      <tr>
+                        <td colSpan={4} className="pb-1">
+                          <div className="pl-5 py-1 space-y-0.5">
+                            {v.users.map((u) => (
+                              <a
+                                key={u.email}
+                                href={`/users/${encodeURIComponent(u.email)}`}
+                                className="block text-[11px] text-zinc-400 hover:text-blue-400 transition-colors"
+                              >
+                                {u.name}
+                                {!isLatest && (
+                                  <span className="ml-1 text-amber-500/60 text-[10px]">
+                                    needs update
+                                  </span>
+                                )}
+                              </a>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </ChartCard>
   );
 }
 

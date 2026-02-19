@@ -2,6 +2,7 @@
   "name": "cursor-usage-tracker",
   "version": "0.0.0-development",
   "description": "Open-source Cursor IDE usage monitoring, anomaly detection, and alerting for enterprise teams",
+  "homepage": "https://cursor-usage-tracker.sticklight.app",
   "type": "module",
   "scripts": {
     "dev": "next dev",
