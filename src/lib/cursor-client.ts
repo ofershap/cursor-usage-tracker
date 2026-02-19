@@ -15,6 +15,8 @@ import type {
   AnalyticsClientVersionsResponse,
   AnalyticsCommandsResponse,
   AnalyticsPlansResponse,
+  ByUserMCPResponse,
+  ByUserCommandsResponse,
 } from "./types";
 
 interface CursorClientOptions {
@@ -247,6 +249,34 @@ export class CursorClient {
     return this.request<AnalyticsPlansResponse>(
       `/analytics/team/plans?${this.analyticsParams(options)}`,
     );
+  }
+
+  async getAnalyticsMCPByUser(
+    options: { startDate?: string; endDate?: string; page?: number; pageSize?: number } = {},
+  ): Promise<ByUserMCPResponse> {
+    const params = this.byUserParams(options);
+    return this.request<ByUserMCPResponse>(`/analytics/by-user/mcp?${params}`);
+  }
+
+  async getAnalyticsCommandsByUser(
+    options: { startDate?: string; endDate?: string; page?: number; pageSize?: number } = {},
+  ): Promise<ByUserCommandsResponse> {
+    const params = this.byUserParams(options);
+    return this.request<ByUserCommandsResponse>(`/analytics/by-user/commands?${params}`);
+  }
+
+  private byUserParams(options: {
+    startDate?: string;
+    endDate?: string;
+    page?: number;
+    pageSize?: number;
+  }): string {
+    const params = new URLSearchParams();
+    params.set("startDate", options.startDate ?? "30d");
+    params.set("endDate", options.endDate ?? "today");
+    params.set("page", String(options.page ?? 1));
+    params.set("pageSize", String(options.pageSize ?? 500));
+    return params.toString();
   }
 
   private analyticsParams(options: {

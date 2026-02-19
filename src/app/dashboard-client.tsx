@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { FullDashboard } from "@/lib/db";
 import { SpendBarChart } from "@/components/charts/spend-bar-chart";
 import { DailySpendChart } from "@/components/charts/daily-spend-chart";
@@ -59,7 +59,13 @@ interface DashboardClientProps {
 
 export function DashboardClient({ initialData }: DashboardClientProps) {
   const [data, setData] = useState(initialData);
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("dashboard-days");
+      if (saved) return parseInt(saved, 10);
+    }
+    return 30;
+  });
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [sortCol, setSortCol] = useState<SortColumn>("spend");
@@ -67,11 +73,13 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   const [groups, setGroups] = useState<BillingGroupWithMembers[]>([]);
   const [selectedGroup, setSelectedGroup] = useState("all");
 
+  const savedDays = useRef(days);
   useEffect(() => {
     fetch("/api/groups")
       .then((r) => r.json())
       .then((data: BillingGroupWithMembers[]) => setGroups(data))
       .catch(() => {});
+    if (savedDays.current !== 30) changeTimeRange(savedDays.current);
   }, []);
 
   const groupEmailSet = useMemo(() => {
@@ -165,6 +173,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
 
   async function changeTimeRange(newDays: number) {
     setDays(newDays);
+    localStorage.setItem("dashboard-days", String(newDays));
     setLoading(true);
     try {
       const res = await fetch(`/api/stats?days=${newDays}`);
@@ -368,10 +377,10 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
         </div>
       )}
 
-      {/* ── Row: Team Spend Trend + Model Cost Breakdown ── */}
+      {/* ── Row: Team Spend Trend + Model Cost Comparison ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <SpendTrendChart data={filteredTeamDailySpend} selectedDays={days} />
-        <ModelCostTable data={data.modelCosts} />
+        <ModelCostComparison data={data.modelCosts} />
       </div>
 
       {/* ── Charts ── */}
@@ -436,48 +445,76 @@ function buildDailySpendData(breakdown: SpendBreakdownRow[]): {
   };
 }
 
-function ModelCostTable({ data }: { data: ModelCost[] }) {
-  const total = data.reduce((s, d) => s + d.total_spend, 0);
+function ModelCostComparison({ data }: { data: ModelCost[] }) {
+  const rows = data
+    .filter((d) => d.total_reqs > 0)
+    .map((d) => ({
+      ...d,
+      costPerReq: d.total_spend / d.total_reqs,
+    }))
+    .sort((a, b) => b.costPerReq - a.costPerReq);
 
-  const shortName = shortModel;
+  const positiveCosts = rows.map((r) => r.costPerReq).filter((c) => c > 0);
+  const cheapest = positiveCosts.length > 0 ? Math.min(...positiveCosts) : 1;
+
+  const colorForMultiplier = (mult: number) => {
+    if (mult >= 8) return "text-red-400";
+    if (mult >= 4) return "text-amber-400";
+    if (mult >= 2) return "text-yellow-400";
+    return "text-emerald-400";
+  };
+
+  const barColorForMultiplier = (mult: number) => {
+    if (mult >= 8) return "bg-red-500/70";
+    if (mult >= 4) return "bg-amber-500/70";
+    if (mult >= 2) return "bg-yellow-500/70";
+    return "bg-emerald-500/70";
+  };
+
+  const maxCostPerReq = rows.length > 0 ? Math.max(...rows.map((r) => r.costPerReq)) : 1;
 
   return (
     <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-      <h3 className="text-xs font-medium text-zinc-400 mb-2">
-        Spend by Model (Primary Model per User)
-      </h3>
+      <h3 className="text-xs font-medium text-zinc-400 mb-2">Model Cost Comparison ($/request)</h3>
       <div className="overflow-y-auto max-h-[200px]">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-zinc-900">
             <tr className="text-zinc-500 border-b border-zinc-800">
               <th className="text-left py-1 font-medium">Model</th>
+              <th className="text-right py-1 font-medium">$/req</th>
+              <th className="text-right py-1 font-medium">Relative</th>
               <th className="text-right py-1 font-medium">Users</th>
-              <th className="text-right py-1 font-medium">Avg $/user</th>
               <th className="text-right py-1 font-medium">Total $</th>
-              <th className="text-right py-1 font-medium">% of spend</th>
             </tr>
           </thead>
           <tbody>
-            {data.map((row) => {
-              const pct = total > 0 ? (row.total_spend / total) * 100 : 0;
+            {rows.map((row) => {
+              const mult = cheapest > 0 ? row.costPerReq / cheapest : 1;
+              const barPct = maxCostPerReq > 0 ? (row.costPerReq / maxCostPerReq) * 100 : 0;
               return (
                 <tr key={row.model} className="border-b border-zinc-800/30 hover:bg-zinc-800/30">
                   <td className="py-1 text-zinc-300 font-mono cursor-default" title={row.model}>
-                    {shortName(row.model)}
+                    {shortModel(row.model)}
                   </td>
-                  <td className="text-right py-1 text-zinc-400">{row.users}</td>
-                  <td className="text-right py-1 font-mono text-zinc-400">${row.avg_spend}</td>
-                  <td className="text-right py-1 font-mono">${row.total_spend.toLocaleString()}</td>
+                  <td className="text-right py-1 font-mono text-zinc-300">
+                    ${row.costPerReq.toFixed(2)}
+                  </td>
                   <td className="text-right py-1">
-                    <div className="flex items-center justify-end gap-1">
-                      <div className="w-12 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <div className="w-14 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-blue-500 rounded-full"
-                          style={{ width: `${Math.min(pct, 100)}%` }}
+                          className={`h-full rounded-full ${barColorForMultiplier(mult)}`}
+                          style={{ width: `${Math.min(barPct, 100)}%` }}
                         />
                       </div>
-                      <span className="text-zinc-500 w-8 text-right">{pct.toFixed(0)}%</span>
+                      <span className={`font-mono w-8 text-right ${colorForMultiplier(mult)}`}>
+                        {mult < 1.05 ? "1x" : `${mult.toFixed(1)}x`}
+                      </span>
                     </div>
+                  </td>
+                  <td className="text-right py-1 text-zinc-400">{row.users}</td>
+                  <td className="text-right py-1 font-mono text-zinc-400">
+                    ${row.total_spend.toLocaleString()}
                   </td>
                 </tr>
               );

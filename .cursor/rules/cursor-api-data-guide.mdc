@@ -88,6 +88,9 @@ Key concepts that affect how we interpret the data:
 - `included_spend_cents` = the portion covered by the plan
 - Actual overage = `spend_cents - included_spend_cents`
 
+### Model Pricing
+Cursor charges at provider list prices (Anthropic, OpenAI, Google, xAI) plus a Teams/Enterprise surcharge of $0.25/1M total tokens. Max mode adds +20% on top. Auto mode has fixed blended rates. There is no public API for pricing tables — the canonical source is `cursor.com/docs/models`. Per-model token prices are NOT needed in our code because `usage_events.total_cents` already has the computed cost per request.
+
 ### Model Cost Drivers
 Model choice is the PRIMARY cost driver. The specific models change over time, but the cost principles are stable:
 
@@ -120,12 +123,15 @@ Legacy field from the old fixed-pricing model. It's NOT the current billing mech
 
 ### Now Collected
 - Per-request token/cost data from `/teams/filtered-usage-events` - gives per-model cost breakdown per user. Stored in `usage_events` table. Collected incrementally (since last timestamp).
-- Command adoption from `/analytics/team/commands` - which Cursor commands people use (explain, refactor, etc.). Stored in `analytics_commands` table.
+- Command adoption from `/analytics/team/commands` - team-level command usage. Stored in `analytics_commands` table.
 - Plan mode adoption from `/analytics/team/plans` - plan mode usage by model. Stored in `analytics_plans` table.
+- Per-user MCP tool usage from `/analytics/by-user/mcp` - which MCP tools each user uses. Stored in `analytics_user_mcp` table.
+- Per-user command usage from `/analytics/by-user/commands` - which commands each user uses. Stored in `analytics_user_commands` table.
 
 ### Not Currently Collected (but available)
 - AI Code Tracking data from `/analytics/ai-code/commits` - would give us accurate AI vs human line attribution
-- Per-user breakdowns from `/analytics/by-user/*` endpoints (agent-edits, tabs, models, mcp, commands, plans, ask-mode, client-versions, top-file-extensions)
+- Per-user breakdowns from `/analytics/by-user/*` endpoints for: agent-edits, tabs, models, plans, ask-mode, client-versions, top-file-extensions (we collect mcp and commands per-user, but not these others)
+- Leaderboard from `/analytics/team/leaderboard` - ranks users by tab accepts and agent edits. We chose NOT to collect this because it introduces a third ranking system that conflicts with our own spend_rank and activity_rank, confusing stakeholders.
 - `cmdkUsages`, `subscriptionIncludedReqs`, `apiKeyReqs`, `bugbotUsages` - available in daily usage but not stored
 - Audit logs from `/teams/audit-logs` - login events, settings changes, security events
 
@@ -151,3 +157,50 @@ Low accept rate could mean: picky reviewer (good), bad prompting (fixable), or w
 `lines_added / agent_requests`
 
 Highly task-dependent. A debugging session produces 0 lines. A scaffolding task produces 500. Not a quality metric.
+
+## Daily Spend Data Sources
+
+`usage_events` (from `/teams/filtered-usage-events`) is the most reliable source for daily spend data. It has per-request cost (`total_cents`) with full billing cycle history and no retention window. `daily_spend` (from `/teams/groups` billing groups API) has only ~2 days retention and systematically underreports compared to `usage_events`.
+
+The dashboard daily spend chart uses `usage_events` as the primary source, falling back to `daily_spend` only when the `usage_events` table is empty (e.g., a fresh install that hasn't collected events yet). The chart marks the last 2 days as "provisional" since spend data for today/yesterday may still be accumulating.
+
+## Conversation Insights (Dashboard-Only)
+
+The Cursor web dashboard has a "Conversation Insights" page (`cursor.com/dashboard?tab=conversation-insights`) that shows Work Type (KTLO/Feature/Bug), Intent Distribution (Write Code/Ask/Task Automation/Plan), Categories (Bug Fix/Configuration/Feature/Refactor), Task Complexity, and Prompt Specificity. This data is computed server-side from conversation content using AI analysis. There is NO API endpoint for it — it is a dashboard-only enterprise feature.
+
+## Complete Analytics API Endpoint List
+
+### Team-level endpoints (all collected)
+- `/analytics/team/dau` — daily active users (+ CLI, Cloud Agent, BugBot DAU)
+- `/analytics/team/models` — model usage breakdown per day
+- `/analytics/team/agent-edits` — diffs suggested/accepted/rejected
+- `/analytics/team/tabs` — tab autocomplete metrics
+- `/analytics/team/mcp` — MCP tool adoption
+- `/analytics/team/top-file-extensions` — file types
+- `/analytics/team/client-versions` — version distribution
+- `/analytics/team/commands` — command adoption
+- `/analytics/team/plans` — plan mode adoption
+- `/analytics/team/ask-mode` — ask mode adoption (not collected)
+- `/analytics/team/leaderboard` — user rankings by AI usage (not collected — see note above)
+
+### By-user endpoints (paginated, data keyed by email)
+- `/analytics/by-user/mcp` — per-user MCP tool usage (collected)
+- `/analytics/by-user/commands` — per-user command usage (collected)
+- `/analytics/by-user/agent-edits` — per-user agent edits (not collected)
+- `/analytics/by-user/tabs` — per-user tab usage (not collected)
+- `/analytics/by-user/models` — per-user model usage (not collected — covered by daily_usage)
+- `/analytics/by-user/plans` — per-user plan mode (not collected)
+- `/analytics/by-user/ask-mode` — per-user ask mode (not collected)
+- `/analytics/by-user/client-versions` — per-user versions (not collected — covered by daily_usage)
+- `/analytics/by-user/top-file-extensions` — per-user file types (not collected)
+
+## Critical: Billing Groups API Daily Spend Retention
+
+The `/teams/groups` endpoint returns `dailySpend` per member, but this data has a **very short retention window — approximately 2 days**. Older daily spend data is dropped from the API response entirely.
+
+This means:
+- If you don't collect at least once per day, you will permanently lose daily spend granularity for missed days
+- Early-day collections capture incomplete data (spend accumulates throughout the day)
+- The `upsertDailySpend` function uses `MAX(existing, new)` to prevent regressions from partial data overwriting complete data
+- Ideal collection frequency: at least twice daily (e.g. midday + end of day) to capture most of each day's spend before it falls off the API
+- The dashboard marks the last 2 days as "partial (API lag)" since spend data may not be fully settled yet

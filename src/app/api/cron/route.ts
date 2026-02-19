@@ -65,23 +65,39 @@ export async function POST(request: Request) {
 
     if (lastSummary !== today) {
       const db = getDb();
-      const spendRow = db
-        .prepare(
-          `SELECT COALESCE(SUM(spend_cents), 0) as total
-           FROM (SELECT email, MAX(spend_cents) as spend_cents FROM spending
-                 WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)
-                 GROUP BY email)`,
-        )
-        .get() as { total: number };
+      const hasUE =
+        (db.prepare("SELECT COUNT(*) as c FROM usage_events").get() as { c: number }).c > 0;
 
-      const topSpenders = db
-        .prepare(
-          `SELECT COALESCE(m.name, s.email) as name, s.spend_cents as spend
-           FROM spending s LEFT JOIN members m ON s.email = m.email
-           WHERE s.cycle_start = (SELECT MAX(cycle_start) FROM spending) AND s.spend_cents > 0
-           ORDER BY s.spend_cents DESC LIMIT 5`,
-        )
-        .all() as Array<{ name: string; spend: number }>;
+      const spendRow = hasUE
+        ? (db
+            .prepare(`SELECT COALESCE(ROUND(SUM(total_cents)), 0) as total FROM usage_events`)
+            .get() as { total: number })
+        : (db
+            .prepare(
+              `SELECT COALESCE(SUM(spend_cents), 0) as total
+               FROM (SELECT email, MAX(spend_cents) as spend_cents FROM spending
+                     WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)
+                     GROUP BY email)`,
+            )
+            .get() as { total: number });
+
+      const topSpenders = hasUE
+        ? (db
+            .prepare(
+              `SELECT COALESCE(m.name, ue.user_email) as name, ROUND(SUM(ue.total_cents)) as spend
+               FROM usage_events ue LEFT JOIN members m ON ue.user_email = m.email
+               GROUP BY ue.user_email HAVING spend > 0
+               ORDER BY spend DESC LIMIT 5`,
+            )
+            .all() as Array<{ name: string; spend: number }>)
+        : (db
+            .prepare(
+              `SELECT COALESCE(m.name, s.email) as name, s.spend_cents as spend
+               FROM spending s LEFT JOIN members m ON s.email = m.email
+               WHERE s.cycle_start = (SELECT MAX(cycle_start) FROM spending) AND s.spend_cents > 0
+               ORDER BY s.spend_cents DESC LIMIT 5`,
+            )
+            .all() as Array<{ name: string; spend: number }>);
 
       const limitedRow = db
         .prepare("SELECT value FROM metadata WHERE key = 'limited_users_count'")

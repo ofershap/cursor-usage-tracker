@@ -17,6 +17,8 @@ import {
   upsertAnalyticsClientVersions,
   upsertAnalyticsCommands,
   upsertAnalyticsPlans,
+  upsertAnalyticsUserMCP,
+  upsertAnalyticsUserCommands,
   logCollection,
   setMetadata,
 } from "./db";
@@ -307,6 +309,70 @@ async function collectAnalytics(
         const data = await client.getAnalyticsPlans(opts);
         upsertAnalyticsPlans(data.data);
         return data.data.length;
+      },
+    },
+    {
+      name: "user-mcp",
+      fn: async () => {
+        let page = 1;
+        let total = 0;
+        while (true) {
+          const data = await client.getAnalyticsMCPByUser({ ...opts, page, pageSize: 500 });
+          const entries: Array<{
+            date: string;
+            email: string;
+            tool_name: string;
+            server_name: string;
+            usage: number;
+          }> = [];
+          for (const [email, items] of Object.entries(data.data)) {
+            for (const item of items) {
+              entries.push({
+                date: item.event_date,
+                email,
+                tool_name: item.tool_name,
+                server_name: item.mcp_server_name,
+                usage: item.usage,
+              });
+            }
+          }
+          if (entries.length > 0) upsertAnalyticsUserMCP(entries);
+          total += entries.length;
+          if (!data.pagination.hasNextPage) break;
+          page++;
+        }
+        return total;
+      },
+    },
+    {
+      name: "user-commands",
+      fn: async () => {
+        let page = 1;
+        let total = 0;
+        while (true) {
+          const data = await client.getAnalyticsCommandsByUser({ ...opts, page, pageSize: 500 });
+          const entries: Array<{
+            date: string;
+            email: string;
+            command_name: string;
+            usage: number;
+          }> = [];
+          for (const [email, items] of Object.entries(data.data)) {
+            for (const item of items) {
+              entries.push({
+                date: item.event_date,
+                email,
+                command_name: item.command_name,
+                usage: item.usage,
+              });
+            }
+          }
+          if (entries.length > 0) upsertAnalyticsUserCommands(entries);
+          total += entries.length;
+          if (!data.pagination.hasNextPage) break;
+          page++;
+        }
+        return total;
       },
     },
   ];

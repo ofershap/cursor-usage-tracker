@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default function HomePage() {
   try {
-    const data = getFullDashboard(7);
+    const data = getFullDashboard(30);
     return <DashboardClient initialData={data} />;
   } catch {
     return (

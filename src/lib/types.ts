@@ -224,6 +224,27 @@ export interface AnalyticsPlansResponse {
   params: Record<string, unknown>;
 }
 
+export interface ByUserPagination {
+  page: number;
+  pageSize: number;
+  totalUsers: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+}
+
+export interface ByUserMCPResponse {
+  data: Record<string, AnalyticsMCPEntry[]>;
+  pagination: ByUserPagination;
+  params: Record<string, unknown>;
+}
+
+export interface ByUserCommandsResponse {
+  data: Record<string, AnalyticsCommandsEntry[]>;
+  pagination: ByUserPagination;
+  params: Record<string, unknown>;
+}
+
 export interface FilteredUsageEvent {
   timestamp: string;
   model: string;

@@ -50,6 +50,9 @@ interface UserStats {
     overage_cost_cents: number;
     error_reqs: number;
   }>;
+  mcpSummary: Array<{ tool_name: string; server_name: string; total_usage: number }>;
+  commandsSummary: Array<{ command_name: string; total_usage: number }>;
+  ranks: { spendRank: number; activityRank: number; totalRanked: number } | null;
 }
 
 interface UserDetailClientProps {
@@ -67,15 +70,20 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
   const currentSpend = stats.spending[0];
   const activityDays = stats.dailyActivity.length;
   const totalAgentRequests = stats.dailyActivity.reduce((sum, d) => sum + d.agent_requests, 0);
-  const totalLinesAdded = stats.dailyActivity.reduce((sum, d) => sum + d.lines_added, 0);
-  const openAnomalies = stats.anomalies.filter((a) => !a.resolvedAt);
+  const totalAccepts = stats.dailyActivity.reduce((sum, d) => sum + d.total_accepts, 0);
+  const totalRejects = stats.dailyActivity.reduce((sum, d) => sum + d.total_rejects, 0);
+  const acceptRate =
+    totalAccepts + totalRejects > 0
+      ? Math.round((totalAccepts / (totalAccepts + totalRejects)) * 100)
+      : null;
   const totalSpendCents = stats.dailySpend.reduce((s, d) => s + d.spend_cents, 0);
   const totalSpendDollars = totalSpendCents / 100;
   const dollarsPerReq =
     totalAgentRequests > 0 ? (totalSpendCents / totalAgentRequests / 100).toFixed(2) : null;
   const dailyAvgSpend =
     stats.dailySpend.length > 0 ? totalSpendDollars / stats.dailySpend.length : 0;
-  const cycleSpendDollars = currentSpend ? currentSpend.spend_cents / 100 : 0;
+  const cycleSpendDollars =
+    totalSpendDollars || (currentSpend ? currentSpend.spend_cents / 100 : 0);
 
   const mergedDailyData = buildMergedDailyData(stats.dailySpend, stats.dailyActivity);
   const hasUsageEvents = stats.usageEventsSummary.length > 0;
@@ -107,15 +115,18 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
         />
         <KpiCard label={`Agent Reqs (${activityDays}d)`} value={fmt(totalAgentRequests)} />
         <KpiCard
-          label={`Lines Added (${activityDays}d)`}
-          value={fmt(totalLinesAdded)}
-          sub="AI + manual + paste"
+          label="Accept Rate"
+          value={acceptRate != null ? `${acceptRate}%` : "—"}
+          sub="of agent diffs accepted"
         />
         <KpiCard
-          label="Anomalies"
-          value={openAnomalies.length.toString()}
-          alert={openAnomalies.length > 0}
-          sub={openAnomalies.length > 0 ? "Open" : "None"}
+          label="Team Rank"
+          value={stats.ranks ? `#${stats.ranks.spendRank}` : "—"}
+          sub={
+            stats.ranks
+              ? `spend / #${stats.ranks.activityRank} activity (of ${stats.ranks.totalRanked})`
+              : "No rank data"
+          }
         />
       </div>
 
@@ -223,6 +234,88 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
                 <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Overage
               </span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {(stats.mcpSummary.length > 0 || stats.commandsSummary.length > 0) && (
+        <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-zinc-800">
+            <h3 className="text-xs font-medium text-zinc-400">Tools & Features</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-0 md:divide-x md:divide-zinc-800">
+            {stats.mcpSummary.length > 0 && (
+              <div className="p-4">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
+                  MCP Tools
+                </div>
+                <div className="space-y-1.5">
+                  {stats.mcpSummary.slice(0, 10).map((t) => (
+                    <div
+                      key={`${t.tool_name}-${t.server_name}`}
+                      className="flex items-center justify-between text-xs"
+                    >
+                      <span className="text-zinc-300 truncate mr-2">
+                        {t.tool_name}
+                        <span className="text-zinc-600 ml-1">({t.server_name})</span>
+                      </span>
+                      <span className="font-mono text-zinc-500 shrink-0">
+                        {t.total_usage.toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {stats.commandsSummary.length > 0 && (
+              <div className="p-4">
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
+                  Commands
+                </div>
+                <div className="space-y-1.5">
+                  {stats.commandsSummary.slice(0, 10).map((c) => (
+                    <div key={c.command_name} className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-300">{c.command_name}</span>
+                      <span className="font-mono text-zinc-500">
+                        {c.total_usage.toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {stats.modelBreakdown.length > 0 && (
+        <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-zinc-800">
+            <h3 className="text-xs font-medium text-zinc-400">Model Preferences</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-zinc-800 text-zinc-500">
+                  <th className="text-left px-4 py-2 font-medium">Model</th>
+                  <th className="text-right px-4 py-2 font-medium">Days Used</th>
+                  <th className="text-right px-4 py-2 font-medium">Requests</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.modelBreakdown.map((m) => (
+                  <tr key={m.model} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                    <td className="px-4 py-1.5 text-zinc-400 cursor-default" title={m.model}>
+                      {shortModel(m.model)}
+                    </td>
+                    <td className="text-right px-4 py-1.5 font-mono">{m.days_used}</td>
+                    <td className="text-right px-4 py-1.5 font-mono">
+                      {m.total_requests.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -424,31 +517,39 @@ function UsageProfileRadar({ stats }: { stats: UserStats }) {
   const totalAccepts = da.reduce((s, d) => s + d.total_accepts, 0);
   const totalRejects = da.reduce((s, d) => s + d.total_rejects, 0);
   const totalUsageBased = da.reduce((s, d) => s + d.usage_based_reqs, 0);
-  const totalSpendCents = stats.dailySpend.reduce((s, d) => s + d.spend_cents, 0);
 
   const activityPct = totalDays > 0 ? Math.round((activeDays / totalDays) * 100) : 0;
   const reqsPerDay = activeDays > 0 ? Math.round(totalReqs / activeDays) : 0;
   const intensityPct = Math.min(100, Math.round((reqsPerDay / 150) * 100));
   const tabPct = totalReqs > 0 ? Math.min(100, Math.round((totalTabs / totalReqs) * 200)) : 0;
-  const acceptRate =
+  const radarAcceptRate =
     totalAccepts + totalRejects > 0
       ? Math.round((totalAccepts / (totalAccepts + totalRejects)) * 100)
       : 0;
   const overagePct = totalReqs > 0 ? Math.round((totalUsageBased / totalReqs) * 100) : 0;
-  const costPerReq = totalReqs > 0 ? totalSpendCents / totalReqs / 100 : 0;
-  const efficiencyPct = Math.min(100, Math.max(0, Math.round((1 - costPerReq / 2) * 100)));
+
+  const distinctMcpTools = stats.mcpSummary.length;
+  const distinctCommands = stats.commandsSummary.length;
+  const powerUserScore = Math.min(
+    100,
+    Math.round(((distinctMcpTools + distinctCommands) / 10) * 100),
+  );
 
   const radarData = [
     { axis: "Activity", value: activityPct, detail: `${activeDays}/${totalDays} days active` },
     { axis: "Intensity", value: intensityPct, detail: `${reqsPerDay} reqs/active day` },
     { axis: "Tab Usage", value: tabPct, detail: `${totalTabs} tab accepts` },
-    { axis: "Precision", value: acceptRate, detail: `${acceptRate}% accept rate` },
+    { axis: "Precision", value: radarAcceptRate, detail: `${radarAcceptRate}% accept rate` },
     {
       axis: "On Plan",
       value: 100 - overagePct,
       detail: `${100 - overagePct}% of requests covered by plan`,
     },
-    { axis: "Efficiency", value: efficiencyPct, detail: `$${costPerReq.toFixed(2)} per request` },
+    {
+      axis: "Power User",
+      value: powerUserScore,
+      detail: `${distinctMcpTools} MCP tools, ${distinctCommands} commands`,
+    },
   ];
 
   return (

@@ -65,9 +65,9 @@ Single cron endpoint `POST /api/cron` does both: collect → detect → alert in
 
 ## Dashboard Pages
 
-- `/` — Team overview: stat cards, spend bar chart, daily spend trend, spend breakdown by user, members table with search/sort, **group filter dropdown**, time range picker (24h/3d/7d/14d/30d), billing cycle progress
+- `/` — Team overview: stat cards, model cost comparison table ($/request relative multipliers), daily spend trend (sourced from `usage_events` with `daily_spend` fallback, last 2 days marked provisional), spend breakdown by user, members table with search/sort, **group filter dropdown**, time range picker (24h/3d/7d/14d/30d), billing cycle progress
 - `/insights` — Analytics: DAU chart, model adoption, model efficiency rankings, MCP tool usage, file extensions, client versions
-- `/users/[email]` — Per-user: token timeline, model pie chart, feature breakdown, activity profile, anomaly history
+- `/users/[email]` — Per-user detail: KPI cards (cycle spend, $/req, agent reqs, accept rate, team rank), spend trend chart, usage profile radar (activity, intensity, tab usage, precision, on plan, power user), cost breakdown by model, tools & features (MCP tools + commands per user), model preferences, daily activity table, anomaly history
 - `/anomalies` — MTTD/MTTI/MTTR metrics, open incidents (acknowledge/resolve), anomaly table
 - `/settings` — Detection thresholds, **billing group management** (rename, assign, create), **HiBob CSV import** with change preview
 
@@ -90,7 +90,7 @@ Single cron endpoint `POST /api/cron` does both: collect → detect → alert in
 
 ## Database Tables
 
-members, daily_usage, spending, usage_events, anomalies, incidents, config, collection_log, metadata, daily_spend, billing_groups, group_members, billing_group_members, analytics_dau, analytics_model_usage, analytics_agent_edits, analytics_tabs, analytics_mcp, analytics_file_extensions, analytics_client_versions
+members, daily_usage, spending, usage_events, anomalies, incidents, config, collection_log, metadata, daily_spend, billing_groups, group_members, billing_group_members, analytics_dau, analytics_model_usage, analytics_agent_edits, analytics_tabs, analytics_mcp, analytics_file_extensions, analytics_client_versions, analytics_commands, analytics_plans, analytics_user_mcp, analytics_user_commands
 
 ## Important Caveats
 

@@ -736,6 +736,53 @@ function run() {
   });
   planTx();
 
+  const userMcpStmt = db.prepare(
+    "INSERT INTO analytics_user_mcp (date, email, tool_name, server_name, usage) VALUES (?, ?, ?, ?, ?)",
+  );
+  const userMcpTx = db.transaction(() => {
+    for (let d = 0; d < DAYS; d++) {
+      const date = dateStr(DAYS - 1 - d);
+      for (const user of userProfiles) {
+        if (Math.random() < 0.4) continue;
+        const toolCount =
+          user.activityLevel === "high"
+            ? rand(3, 8)
+            : user.activityLevel === "medium"
+              ? rand(1, 4)
+              : rand(0, 2);
+        const shuffled = [...MCP_TOOLS].sort(() => Math.random() - 0.5);
+        for (let t = 0; t < Math.min(toolCount, shuffled.length); t++) {
+          const tool = shuffled[t] as (typeof MCP_TOOLS)[number];
+          userMcpStmt.run(date, user.email, tool.tool, tool.server, rand(1, 30));
+        }
+      }
+    }
+  });
+  userMcpTx();
+
+  const userCmdStmt = db.prepare(
+    "INSERT INTO analytics_user_commands (date, email, command_name, usage) VALUES (?, ?, ?, ?)",
+  );
+  const userCmdTx = db.transaction(() => {
+    for (let d = 0; d < DAYS; d++) {
+      const date = dateStr(DAYS - 1 - d);
+      for (const user of userProfiles) {
+        if (Math.random() < 0.3) continue;
+        const cmdCount =
+          user.activityLevel === "high"
+            ? rand(3, 6)
+            : user.activityLevel === "medium"
+              ? rand(1, 4)
+              : rand(0, 2);
+        const shuffled = [...COMMANDS].sort(() => Math.random() - 0.5);
+        for (let c = 0; c < Math.min(cmdCount, shuffled.length); c++) {
+          userCmdStmt.run(date, user.email, shuffled[c], rand(1, 20));
+        }
+      }
+    }
+  });
+  userCmdTx();
+
   const metaStmt = db.prepare("INSERT INTO metadata (key, value, updated_at) VALUES (?, ?, ?)");
   metaStmt.run("cycle_start", CYCLE_START, now);
   metaStmt.run("cycle_end", CYCLE_END, now);
@@ -928,6 +975,19 @@ function createSchema(db: Database.Database) {
       collected_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (date, model)
     );
+    CREATE TABLE IF NOT EXISTS analytics_user_mcp (
+      date TEXT NOT NULL, email TEXT NOT NULL, tool_name TEXT NOT NULL,
+      server_name TEXT NOT NULL, usage INTEGER NOT NULL DEFAULT 0,
+      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (date, email, tool_name, server_name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_mcp_email ON analytics_user_mcp(email);
+    CREATE TABLE IF NOT EXISTS analytics_user_commands (
+      date TEXT NOT NULL, email TEXT NOT NULL, command_name TEXT NOT NULL,
+      usage INTEGER NOT NULL DEFAULT 0, collected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (date, email, command_name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_commands_email ON analytics_user_commands(email);
     CREATE TABLE IF NOT EXISTS metadata (
       key TEXT PRIMARY KEY, value TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))

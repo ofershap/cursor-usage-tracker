@@ -64,7 +64,19 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
     };
   });
 
-  const avg = chartData.reduce((s, d) => s + d.spend, 0) / chartData.length;
+  const provisionalDays = 2;
+  const provisionalStart =
+    chartData.length > provisionalDays
+      ? chartData[chartData.length - provisionalDays]?.date
+      : undefined;
+
+  const settledData = provisionalStart
+    ? chartData.filter((d) => d.date < provisionalStart)
+    : chartData;
+  const avg =
+    settledData.length > 0
+      ? settledData.reduce((s, d) => s + d.spend, 0) / settledData.length
+      : chartData.reduce((s, d) => s + d.spend, 0) / chartData.length;
 
   const cutoffDate =
     selectedDays && selectedDays < data.length ? data[data.length - selectedDays]?.date : undefined;
@@ -79,6 +91,11 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
       <div className="flex items-baseline gap-2 mb-2">
         <h3 className="text-xs font-medium text-zinc-400">Daily Spend</h3>
         <span className="text-[10px] text-zinc-600">{data.length} days of data</span>
+        {provisionalStart && (
+          <span className="text-[10px] text-amber-500/70 ml-auto">
+            Last {provisionalDays}d may be partial (API lag)
+          </span>
+        )}
       </div>
       <ResponsiveContainer width="100%" height={200}>
         <AreaChart data={chartData} margin={{ left: 0, right: 10 }}>
@@ -100,6 +117,7 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
               const pt = payload[0]?.payload as (typeof chartData)[0] | undefined;
               if (!pt) return null;
               const isInRange = !cutoffDate || pt.date >= cutoffDate;
+              const isProvisional = provisionalStart != null && pt.date >= provisionalStart;
               const changeColor = pt.change > 0 ? "#ef4444" : pt.change < 0 ? "#22c55e" : "#a1a1aa";
               const changeSign = pt.change > 0 ? "+" : "";
               return (
@@ -107,6 +125,7 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
                   <div className="text-zinc-400 mb-1">
                     {formatDateLabel(String(label))}
                     {!isInRange && <span className="text-zinc-600 ml-1">(context)</span>}
+                    {isProvisional && <span className="text-amber-500 ml-1">(partial)</span>}
                   </div>
                   <div className="font-mono font-bold text-sm">{fmtDollars(pt.spend)}</div>
                   {pt.change !== 0 && (
@@ -155,6 +174,17 @@ export function SpendTrendChart({ data, selectedDays }: SpendTrendChartProps) {
               fill="#18181b"
               fillOpacity={0.6}
               strokeOpacity={0}
+            />
+          )}
+          {provisionalStart && (
+            <ReferenceArea
+              x1={provisionalStart}
+              x2={chartData[chartData.length - 1]?.date}
+              fill="#f59e0b"
+              fillOpacity={0.04}
+              stroke="#f59e0b"
+              strokeOpacity={0.15}
+              strokeDasharray="3 3"
             />
           )}
           <ReferenceLine
