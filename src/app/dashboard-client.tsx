@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import type { FullDashboard } from "@/lib/db";
 import { SpendBarChart } from "@/components/charts/spend-bar-chart";
@@ -61,13 +61,7 @@ interface DashboardClientProps {
 export function DashboardClient({ initialData }: DashboardClientProps) {
   const searchParams = useSearchParams();
   const [data, setData] = useState(initialData);
-  const [days, setDays] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("dashboard-days");
-      if (saved) return parseInt(saved, 10);
-    }
-    return 30;
-  });
+  const [days, setDays] = useState(30);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [sortCol, setSortCol] = useState<SortColumn>("spend");
@@ -77,7 +71,6 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   const [groups, setGroups] = useState<BillingGroupWithMembers[]>([]);
   const [selectedGroup, setSelectedGroup] = useState("all");
 
-  const savedDays = useRef(days);
   const groupParam = searchParams.get("group");
   useEffect(() => {
     fetch("/api/groups")
@@ -89,7 +82,11 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
         }
       })
       .catch(() => {});
-    if (savedDays.current !== 30) changeTimeRange(savedDays.current);
+    const saved = localStorage.getItem("dashboard-days");
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (parsed !== 30) changeTimeRange(parsed);
+    }
   }, []);
 
   const groupEmailSet = useMemo(() => {
