@@ -9,6 +9,7 @@ import type {
   DetectionConfig,
   GroupMemberSpend,
   FilteredUsageEvent,
+  AICodeCommit,
   AnalyticsDAUEntry,
   AnalyticsModelUsageEntry,
   AnalyticsAgentEditsEntry,
@@ -300,6 +301,25 @@ function initSchema(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_user_commands_email ON analytics_user_commands(email);
+
+    CREATE TABLE IF NOT EXISTS ai_code_commits (
+      email TEXT NOT NULL,
+      date TEXT NOT NULL,
+      commits INTEGER NOT NULL DEFAULT 0,
+      total_lines_added INTEGER NOT NULL DEFAULT 0,
+      total_lines_deleted INTEGER NOT NULL DEFAULT 0,
+      tab_lines_added INTEGER NOT NULL DEFAULT 0,
+      tab_lines_deleted INTEGER NOT NULL DEFAULT 0,
+      composer_lines_added INTEGER NOT NULL DEFAULT 0,
+      composer_lines_deleted INTEGER NOT NULL DEFAULT 0,
+      non_ai_lines_added INTEGER NOT NULL DEFAULT 0,
+      non_ai_lines_deleted INTEGER NOT NULL DEFAULT 0,
+      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (email, date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ai_code_email ON ai_code_commits(email);
+    CREATE INDEX IF NOT EXISTS idx_ai_code_date ON ai_code_commits(date);
 
     CREATE TABLE IF NOT EXISTS metadata (
       key TEXT PRIMARY KEY,
@@ -814,16 +834,17 @@ export function logCollection(type: string, count: number, error?: string): void
   ).run(type, count, error ?? null);
 }
 
-export type UsageBadge =
-  | "power-user"
-  | "deep-thinker"
-  | "balanced"
-  | "tab-completer"
-  | "light-user";
+export type UsageBadge = "power-user" | "deep-thinker" | "balanced" | "light-user";
 
 export type SpendBadge = "cost-efficient" | "premium-model" | "over-budget";
 
 export type ContextBadge = "long-sessions" | "short-sessions";
+export type AdoptionBadge =
+  | "ai-native"
+  | "high-adoption"
+  | "moderate-adoption"
+  | "low-adoption"
+  | "manual-coder";
 
 export interface RankedUser {
   rank: number;
@@ -840,10 +861,13 @@ export interface RankedUser {
   active_days: number;
   tabs_accepted: number;
   tabs_shown: number;
+  total_applies: number;
+  total_accepts: number;
   avg_cache_read: number;
   usage_badge: UsageBadge | null;
   spend_badge: SpendBadge | null;
   context_badge: ContextBadge | null;
+  adoption_badge: AdoptionBadge | null;
 }
 
 export interface DashboardStats {
@@ -976,6 +1000,8 @@ export function getFullDashboard(days: number = 7): FullDashboard {
               SUM(lines_added) as lines_added,
               SUM(tabs_accepted) as tabs_accepted,
               SUM(total_tabs_shown) as tabs_shown,
+              SUM(total_applies) as total_applies,
+              SUM(total_accepts) as total_accepts,
               COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days,
               MAX(most_used_model) as most_used_model
             FROM daily_usage
@@ -992,6 +1018,8 @@ export function getFullDashboard(days: number = 7): FullDashboard {
             COALESCE(a.active_days, 0) as active_days,
             COALESCE(a.tabs_accepted, 0) as tabs_accepted,
             COALESCE(a.tabs_shown, 0) as tabs_shown,
+            COALESCE(a.total_applies, 0) as total_applies,
+            COALESCE(a.total_accepts, 0) as total_accepts,
             COALESCE(uc.avg_cache_read, 0) as avg_cache_read,
             RANK() OVER (ORDER BY COALESCE(us.spend_cents, 0) DESC) as spend_rank,
             RANK() OVER (ORDER BY COALESCE(a.agent_requests, 0) DESC) as activity_rank
@@ -1017,6 +1045,8 @@ export function getFullDashboard(days: number = 7): FullDashboard {
               SUM(lines_added) as lines_added,
               SUM(tabs_accepted) as tabs_accepted,
               SUM(total_tabs_shown) as tabs_shown,
+              SUM(total_applies) as total_applies,
+              SUM(total_accepts) as total_accepts,
               COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days,
               MAX(most_used_model) as most_used_model
             FROM daily_usage
@@ -1033,6 +1063,8 @@ export function getFullDashboard(days: number = 7): FullDashboard {
             COALESCE(a.active_days, 0) as active_days,
             COALESCE(a.tabs_accepted, 0) as tabs_accepted,
             COALESCE(a.tabs_shown, 0) as tabs_shown,
+            COALESCE(a.total_applies, 0) as total_applies,
+            COALESCE(a.total_accepts, 0) as total_accepts,
             0 as avg_cache_read,
             RANK() OVER (ORDER BY COALESCE(us.spend_cents, 0) DESC) as spend_rank,
             RANK() OVER (ORDER BY COALESCE(a.agent_requests, 0) DESC) as activity_rank
@@ -1056,6 +1088,8 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     active_days: number;
     tabs_accepted: number;
     tabs_shown: number;
+    total_applies: number;
+    total_accepts: number;
     avg_cache_read: number;
     spend_rank: number;
     activity_rank: number;
@@ -1207,6 +1241,8 @@ function assignBadges(
     active_days: number;
     tabs_accepted: number;
     tabs_shown: number;
+    total_applies: number;
+    total_accepts: number;
     avg_cache_read: number;
     spend_rank: number;
     activity_rank: number;
@@ -1216,8 +1252,16 @@ function assignBadges(
     usage_badge: UsageBadge | null;
     spend_badge: SpendBadge | null;
     context_badge: ContextBadge | null;
+    adoption_badge: AdoptionBadge | null;
   }
 > {
+  const maxActiveDays = Math.max(...users.map((u) => u.active_days), 1);
+  const activeUsersForIntensity = users.filter((u) => u.agent_requests >= 10 && u.active_days > 0);
+  const intensities = activeUsersForIntensity
+    .map((u) => u.agent_requests / u.active_days)
+    .sort((a, b) => a - b);
+  const p90Intensity = intensities[Math.floor(intensities.length * 0.9)] ?? 50;
+
   const activeUsers = users.filter((u) => u.agent_requests >= 30);
   const reqValues = activeUsers.map((u) => u.agent_requests).sort((a, b) => a - b);
 
@@ -1247,12 +1291,9 @@ function assignBadges(
       usage_badge = "light-user";
     } else {
       const reqsPerDay = u.active_days > 0 ? u.agent_requests / u.active_days : 0;
-      const tabRatio = u.agent_requests > 0 ? u.tabs_accepted / u.agent_requests : 0;
       const usesMax = isMaxModel(u.most_used_model);
 
-      if (tabRatio > 1.5) {
-        usage_badge = "tab-completer";
-      } else if (usesMax) {
+      if (usesMax) {
         usage_badge = "deep-thinker";
       } else if (reqsPerDay >= 80) {
         usage_badge = "power-user";
@@ -1285,24 +1326,26 @@ function assignBadges(
       context_badge = "short-sessions";
     }
 
-    const allBadges: Array<{ type: "context" | "spend" | "usage"; priority: number }> = [];
-    if (spend_badge === "over-budget") allBadges.push({ type: "spend", priority: 0 });
-    if (context_badge) allBadges.push({ type: "context", priority: 1 });
-    if (spend_badge === "premium-model") allBadges.push({ type: "spend", priority: 2 });
-    if (spend_badge === "cost-efficient") allBadges.push({ type: "spend", priority: 3 });
-    if (usage_badge && usage_badge !== "balanced" && usage_badge !== "light-user")
-      allBadges.push({ type: "usage", priority: 4 });
-    if (usage_badge === "balanced") allBadges.push({ type: "usage", priority: 5 });
-    if (usage_badge === "light-user") allBadges.push({ type: "usage", priority: 6 });
-
-    allBadges.sort((a, b) => a.priority - b.priority);
-    const kept = new Set(allBadges.slice(0, 2).map((b) => b.type));
+    let adoption_badge: AdoptionBadge | null = null;
+    if (u.agent_requests >= 10 && u.active_days > 0) {
+      const acceptRate = u.total_applies > 0 ? u.total_accepts / u.total_applies : 0;
+      const intensity = u.agent_requests / u.active_days;
+      const intensityNorm = Math.min(intensity / p90Intensity, 1);
+      const consistency = u.active_days / maxActiveDays;
+      const score = acceptRate * 40 + intensityNorm * 40 + consistency * 20;
+      if (score >= 80) adoption_badge = "ai-native";
+      else if (score >= 55) adoption_badge = "high-adoption";
+      else if (score >= 30) adoption_badge = "moderate-adoption";
+      else if (score >= 10) adoption_badge = "low-adoption";
+      else adoption_badge = "manual-coder";
+    }
 
     return {
       ...u,
-      usage_badge: kept.has("usage") ? usage_badge : null,
-      spend_badge: kept.has("spend") ? spend_badge : null,
-      context_badge: kept.has("context") ? context_badge : null,
+      usage_badge,
+      spend_badge,
+      context_badge,
+      adoption_badge,
     };
   });
 }
@@ -1310,7 +1353,12 @@ function assignBadges(
 export function getUserBadges(
   email: string,
   days: number = 30,
-): { usage: UsageBadge | null; spend: SpendBadge | null; context: ContextBadge | null } {
+): {
+  usage: UsageBadge | null;
+  spend: SpendBadge | null;
+  context: ContextBadge | null;
+  adoption: AdoptionBadge | null;
+} {
   const db = getDb();
   const dateFilter = `-${days} days`;
 
@@ -1334,7 +1382,7 @@ export function getUserBadges(
     | undefined;
 
   if (!userRow || !userRow.agent_requests) {
-    return { usage: null, spend: null, context: null };
+    return { usage: null, spend: null, context: null, adoption: null };
   }
 
   const spendRow = db
@@ -1377,12 +1425,10 @@ export function getUserBadges(
     usage = "light-user";
   } else {
     const reqsPerDay = userRow.active_days > 0 ? userRow.agent_requests / userRow.active_days : 0;
-    const tabRatio =
-      userRow.agent_requests > 0 ? userRow.tabs_accepted / userRow.agent_requests : 0;
-    if (tabRatio > 1.5) usage = "tab-completer";
-    else if (isMaxModel(userRow.most_used_model)) usage = "deep-thinker";
+    const usesMax = isMaxModel(userRow.most_used_model);
+    if (usesMax) usage = "deep-thinker";
     else if (reqsPerDay >= 80) usage = "power-user";
-    else usage = "balanced";
+    else usage = null;
   }
 
   let spend: SpendBadge | null = null;
@@ -1409,7 +1455,46 @@ export function getUserBadges(
   if (userRow.agent_requests >= 30 && avgCr > 700_000) context = "long-sessions";
   else if (userRow.agent_requests >= 30 && avgCr > 0 && avgCr < 300_000) context = "short-sessions";
 
-  return { usage, spend, context };
+  let adoption: AdoptionBadge | null = null;
+  if (userRow.agent_requests >= 10 && userRow.active_days > 0) {
+    const teamIntensities = db
+      .prepare(
+        `SELECT SUM(agent_requests) * 1.0 / COUNT(CASE WHEN is_active = 1 THEN 1 END) as rpd
+        FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1
+        GROUP BY email HAVING SUM(agent_requests) >= 10
+        ORDER BY rpd`,
+      )
+      .all(dateFilter) as Array<{ rpd: number }>;
+    const p90i = teamIntensities[Math.floor(teamIntensities.length * 0.9)]?.rpd ?? 50;
+    const acceptRate =
+      userRow.agent_requests >= 10 && userRow.tabs_accepted + userRow.agent_requests > 0
+        ? (db
+            .prepare(
+              `SELECT SUM(total_applies) as ap, SUM(total_accepts) as ac
+           FROM daily_usage WHERE email = ? AND date >= date('now', ?) AND is_active = 1`,
+            )
+            .get(email, dateFilter) as { ap: number; ac: number })
+        : { ap: 0, ac: 0 };
+    const ar = acceptRate.ap > 0 ? acceptRate.ac / acceptRate.ap : 0;
+    const intensity = userRow.agent_requests / userRow.active_days;
+    const intensityNorm = Math.min(intensity / p90i, 1);
+    const elapsedBadge = db
+      .prepare(
+        `SELECT CAST(julianday('now') - julianday(MIN(date)) AS INTEGER) + 1 as elapsed
+         FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1`,
+      )
+      .get(dateFilter) as { elapsed: number | null } | undefined;
+    const periodForBadge = Math.min(days, elapsedBadge?.elapsed ?? days);
+    const consistency = periodForBadge > 0 ? userRow.active_days / periodForBadge : 0;
+    const score = ar * 40 + intensityNorm * 40 + consistency * 20;
+    if (score >= 80) adoption = "ai-native";
+    else if (score >= 55) adoption = "high-adoption";
+    else if (score >= 30) adoption = "moderate-adoption";
+    else if (score >= 10) adoption = "low-adoption";
+    else adoption = "manual-coder";
+  }
+
+  return { usage, spend, context, adoption };
 }
 
 export function getDashboardStats(days: number = 7): DashboardStats {
@@ -1477,6 +1562,7 @@ export function getUserStats(email: string, days: number = 7) {
   const commandsSummary = getUserCommandsSummary(email, days);
   const contextMetrics = getUserContextMetrics(email, days);
   const badges = getUserBadges(email, days);
+  const aiAdoption = getUserAIAdoption(email, days);
 
   const ranksRow = db
     .prepare(
@@ -1544,6 +1630,7 @@ export function getUserStats(email: string, days: number = 7) {
     group: groupRow ?? null,
     contextMetrics,
     badges,
+    aiAdoption,
   };
 }
 
@@ -2325,6 +2412,237 @@ export function upsertAnalyticsUserCommands(
     for (const e of entries) stmt.run(e.date, e.email, e.command_name, e.usage);
   });
   tx();
+}
+
+export function upsertAICodeCommits(commits: AICodeCommit[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO ai_code_commits (email, date, commits, total_lines_added, total_lines_deleted,
+      tab_lines_added, tab_lines_deleted, composer_lines_added, composer_lines_deleted,
+      non_ai_lines_added, non_ai_lines_deleted)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(email, date) DO UPDATE SET
+      commits = commits + excluded.commits,
+      total_lines_added = total_lines_added + excluded.total_lines_added,
+      total_lines_deleted = total_lines_deleted + excluded.total_lines_deleted,
+      tab_lines_added = tab_lines_added + excluded.tab_lines_added,
+      tab_lines_deleted = tab_lines_deleted + excluded.tab_lines_deleted,
+      composer_lines_added = composer_lines_added + excluded.composer_lines_added,
+      composer_lines_deleted = composer_lines_deleted + excluded.composer_lines_deleted,
+      non_ai_lines_added = non_ai_lines_added + excluded.non_ai_lines_added,
+      non_ai_lines_deleted = non_ai_lines_deleted + excluded.non_ai_lines_deleted,
+      collected_at = datetime('now')
+  `);
+
+  const grouped = new Map<
+    string,
+    {
+      email: string;
+      date: string;
+      commits: number;
+      tla: number;
+      tld: number;
+      tab_a: number;
+      tab_d: number;
+      comp_a: number;
+      comp_d: number;
+      non_a: number;
+      non_d: number;
+    }
+  >();
+
+  for (const c of commits) {
+    const date = c.commitTs.slice(0, 10);
+    const key = `${c.userEmail}:${date}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.commits++;
+      existing.tla += c.totalLinesAdded;
+      existing.tld += c.totalLinesDeleted;
+      existing.tab_a += c.tabLinesAdded;
+      existing.tab_d += c.tabLinesDeleted;
+      existing.comp_a += c.composerLinesAdded;
+      existing.comp_d += c.composerLinesDeleted;
+      existing.non_a += c.nonAiLinesAdded;
+      existing.non_d += c.nonAiLinesDeleted;
+    } else {
+      grouped.set(key, {
+        email: c.userEmail,
+        date,
+        commits: 1,
+        tla: c.totalLinesAdded,
+        tld: c.totalLinesDeleted,
+        tab_a: c.tabLinesAdded,
+        tab_d: c.tabLinesDeleted,
+        comp_a: c.composerLinesAdded,
+        comp_d: c.composerLinesDeleted,
+        non_a: c.nonAiLinesAdded,
+        non_d: c.nonAiLinesDeleted,
+      });
+    }
+  }
+
+  const clearStmt = db.prepare(`
+    DELETE FROM ai_code_commits WHERE email = ? AND date = ?
+  `);
+
+  const tx = db.transaction(() => {
+    for (const g of grouped.values()) {
+      clearStmt.run(g.email, g.date);
+      stmt.run(
+        g.email,
+        g.date,
+        g.commits,
+        g.tla,
+        g.tld,
+        g.tab_a,
+        g.tab_d,
+        g.comp_a,
+        g.comp_d,
+        g.non_a,
+        g.non_d,
+      );
+    }
+  });
+  tx();
+}
+
+export function getUserAIAdoption(
+  email: string,
+  days: number = 30,
+): {
+  score: number;
+  adoptionTier: string;
+  acceptRate: number;
+  intensity: number;
+  intensityNorm: number;
+  consistency: number;
+  agentRequests: number;
+  totalAccepts: number;
+  totalApplies: number;
+  activeDays: number;
+  periodDays: number;
+  commitData: {
+    totalCommits: number;
+    totalLinesAdded: number;
+    aiLinesAdded: number;
+    composerLinesAdded: number;
+    tabLinesAdded: number;
+    nonAiLinesAdded: number;
+    aiPercent: number;
+  } | null;
+} | null {
+  const db = getDb();
+  const dateFilter = `-${days} days`;
+
+  const userRow = db
+    .prepare(
+      `SELECT
+        SUM(agent_requests) as agent_reqs,
+        SUM(total_applies) as applies,
+        SUM(total_accepts) as accepts,
+        COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days
+      FROM daily_usage WHERE email = ? AND date >= date('now', ?) AND is_active = 1`,
+    )
+    .get(email, dateFilter) as {
+    agent_reqs: number | null;
+    applies: number | null;
+    accepts: number | null;
+    active_days: number | null;
+  };
+
+  if (!userRow?.agent_reqs || userRow.agent_reqs < 10) return null;
+
+  const teamP90 = db
+    .prepare(
+      `SELECT reqs_per_day FROM (
+        SELECT SUM(agent_requests) * 1.0 / COUNT(CASE WHEN is_active = 1 THEN 1 END) as reqs_per_day
+        FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1
+        GROUP BY email HAVING SUM(agent_requests) >= 10
+        ORDER BY reqs_per_day
+      ) sub
+      LIMIT 1 OFFSET (SELECT CAST(COUNT(*) * 0.9 AS INTEGER) FROM (
+        SELECT email FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1
+        GROUP BY email HAVING SUM(agent_requests) >= 10
+      ))`,
+    )
+    .get(dateFilter, dateFilter) as { reqs_per_day: number } | undefined;
+
+  const p90Intensity = teamP90?.reqs_per_day ?? 50;
+  const activeDays = userRow.active_days ?? 0;
+  const applies = userRow.applies ?? 0;
+  const accepts = userRow.accepts ?? 0;
+  const agentReqs = userRow.agent_reqs ?? 0;
+
+  const elapsedRow = db
+    .prepare(
+      `SELECT CAST(julianday('now') - julianday(MIN(date)) AS INTEGER) + 1 as elapsed
+       FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1`,
+    )
+    .get(dateFilter) as { elapsed: number | null } | undefined;
+  const periodDays = Math.min(days, elapsedRow?.elapsed ?? days);
+
+  const acceptRate = applies > 0 ? accepts / applies : 0;
+  const intensity = activeDays > 0 ? agentReqs / activeDays : 0;
+  const intensityNorm = Math.min(intensity / p90Intensity, 1);
+  const consistency = periodDays > 0 ? activeDays / periodDays : 0;
+
+  const score = Math.round((acceptRate * 40 + intensityNorm * 40 + consistency * 20) * 10) / 10;
+
+  let tier: string;
+  if (score >= 80) tier = "AI-Native";
+  else if (score >= 55) tier = "High Adoption";
+  else if (score >= 30) tier = "Moderate";
+  else if (score >= 10) tier = "Low Adoption";
+  else tier = "Manual";
+
+  const commitRow = db
+    .prepare(
+      `SELECT SUM(commits) as c, SUM(total_lines_added) as tla,
+        SUM(tab_lines_added) as tab, SUM(composer_lines_added) as comp,
+        SUM(non_ai_lines_added) as nonai
+      FROM ai_code_commits WHERE email = ? AND date >= date('now', ?)`,
+    )
+    .get(email, dateFilter) as {
+    c: number | null;
+    tla: number | null;
+    tab: number | null;
+    comp: number | null;
+    nonai: number | null;
+  };
+
+  const commitData =
+    commitRow?.c && commitRow.c >= 5
+      ? {
+          totalCommits: commitRow.c,
+          totalLinesAdded: commitRow.tla ?? 0,
+          aiLinesAdded: (commitRow.tab ?? 0) + (commitRow.comp ?? 0),
+          composerLinesAdded: commitRow.comp ?? 0,
+          tabLinesAdded: commitRow.tab ?? 0,
+          nonAiLinesAdded: commitRow.nonai ?? 0,
+          aiPercent:
+            (commitRow.tla ?? 0) > 0
+              ? Math.round(
+                  (((commitRow.tab ?? 0) + (commitRow.comp ?? 0)) / (commitRow.tla ?? 1)) * 1000,
+                ) / 10
+              : 0,
+        }
+      : null;
+
+  return {
+    score,
+    adoptionTier: tier,
+    acceptRate: Math.round(acceptRate * 1000) / 10,
+    intensity: Math.round(intensity * 10) / 10,
+    intensityNorm: Math.round(intensityNorm * 1000) / 10,
+    consistency: Math.round(consistency * 1000) / 10,
+    agentRequests: agentReqs,
+    totalAccepts: accepts,
+    totalApplies: applies,
+    activeDays,
+    periodDays,
+    commitData,
+  };
 }
 
 export function getUserMCPSummary(

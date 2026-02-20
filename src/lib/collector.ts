@@ -19,6 +19,7 @@ import {
   upsertAnalyticsPlans,
   upsertAnalyticsUserMCP,
   upsertAnalyticsUserCommands,
+  upsertAICodeCommits,
   logCollection,
   setMetadata,
 } from "./db";
@@ -376,6 +377,25 @@ async function collectAnalytics(
       },
     },
   ];
+
+  // AI Code Tracking (separate from analytics — different API, paginated)
+  tasks.push({
+    name: "ai-code-commits",
+    fn: async () => {
+      let page = 1;
+      let total = 0;
+      const allCommits: import("./types").AICodeCommit[] = [];
+      while (true) {
+        const data = await client.getAICodeCommits({ ...opts, page, pageSize: 500 });
+        allCommits.push(...data.items);
+        total += data.items.length;
+        if (total >= data.totalCount || data.items.length < 500) break;
+        page++;
+      }
+      if (allCommits.length > 0) upsertAICodeCommits(allCommits);
+      return total;
+    },
+  });
 
   for (const task of tasks) {
     try {

@@ -120,6 +120,21 @@ Legacy field from the old fixed-pricing model. It's NOT the current billing mech
 - `acceptedLinesAdded / totalLinesAdded` as "AI %" - WRONG for agent users, only valid for tab/composer-heavy users
 - `totalApplies` - may undercount in YOLO/auto-apply mode
 - `usageBasedReqs` vs `agentRequests` - the gap between these is unclear; likely `usageBasedReqs` counts only requests that consumed usage-based billing
+- `nonAiLinesAdded` from ai-code/commits - NOT "manually typed code". It's "unattributed lines" — lines where Cursor's server couldn't trace back to an AI generation event. Breaks on squash merges (attribution from individual commits is lost), initial commits to new repos (no prior AI tracking context), and code that went through review cycles. Verified against real data: a 100% agent-driven user showed 43% "nonAI" due to squash merges and initial commits. Do NOT use this as "% manual work".
+
+### AI Code Tracking API (`/analytics/ai-code/commits`) Limitations
+
+Investigated Feb 2026 by comparing real user data against git history and studying git-ai's approach:
+
+1. **Squash merges lose attribution**: When a PR is squash-merged, the final commit has no record of the individual AI edits from development. All lines appear as `nonAiLinesAdded`. This is the #1 source of false "manual" attribution for teams using squash merge workflows.
+
+2. **Initial commits to new repos**: The first commit to a new repo has no prior AI tracking context. Even if the agent wrote 100% of the code, it all shows as `nonAiLinesAdded`.
+
+3. **Only Cursor Source Control panel commits are tracked**: Terminal `git commit`, VS Code source control, and external git tools produce no tracking data at all.
+
+4. **git-ai (open source alternative) solves this differently**: Uses real-time IDE checkpoints (pre/post edit hooks) stored in `.git/ai/`, intersected with the actual diff at commit time. Survives rebases, squash merges, cherry-picks by rewriting authorship logs. Requires installing their tool — not replicable from API data.
+
+5. **Industry consensus (DX Framework, Cursor's own research)**: Lines-of-code metrics are unreliable for measuring adoption. The recommended approach combines accept rate + engagement intensity + consistency. See "AI Adoption Score" in Derived Metrics.
 
 ### Now Collected
 - Per-request token/cost data from `/teams/filtered-usage-events` - gives per-model cost breakdown per user. Stored in `usage_events` table. Collected incrementally (since last timestamp).
@@ -127,9 +142,9 @@ Legacy field from the old fixed-pricing model. It's NOT the current billing mech
 - Plan mode adoption from `/analytics/team/plans` - plan mode usage by model. Stored in `analytics_plans` table.
 - Per-user MCP tool usage from `/analytics/by-user/mcp` - which MCP tools each user uses. Stored in `analytics_user_mcp` table.
 - Per-user command usage from `/analytics/by-user/commands` - which commands each user uses. Stored in `analytics_user_commands` table.
+- AI Code Tracking from `/analytics/ai-code/commits` - per-commit AI vs manual line attribution. Stored in `ai_code_commits` table (aggregated per user per day). Provides `tabLinesAdded`, `composerLinesAdded`, `nonAiLinesAdded` per commit. Used for AI Adoption % on user detail page. Only tracks commits made through Cursor's Source Control panel — terminal git commits are not captured.
 
 ### Not Currently Collected (but available)
-- AI Code Tracking data from `/analytics/ai-code/commits` - would give us accurate AI vs human line attribution
 - Per-user breakdowns from `/analytics/by-user/*` endpoints for: agent-edits, tabs, models, plans, ask-mode, client-versions, top-file-extensions (we collect mcp and commands per-user, but not these others)
 - Leaderboard from `/analytics/team/leaderboard` - ranks users by tab accepts and agent edits. We chose NOT to collect this because it introduces a third ranking system that conflicts with our own spend_rank and activity_rank, confusing stakeholders.
 - `cmdkUsages`, `subscriptionIncludedReqs`, `apiKeyReqs`, `bugbotUsages` - available in daily usage but not stored
@@ -157,6 +172,22 @@ Low accept rate could mean: picky reviewer (good), bad prompting (fixable), or w
 `lines_added / agent_requests`
 
 Highly task-dependent. A debugging session produces 0 lines. A scaffolding task produces 500. Not a quality metric.
+
+### AI Adoption Score (0-100%)
+Composite score from three signals in `daily_usage`, weighted:
+- **Accept Rate** (40%) — `total_accepts / total_applies` — trust in AI output
+- **Engagement Intensity** (40%) — `agent_requests / active_days`, normalized against team p90 — how heavily they lean on AI
+- **Consistency** (20%) — `active_days / period_days` — regular usage vs sporadic
+
+Tiers: AI-Native (80%+), High (55%+), Moderate (30%+), Low (10%+), Manual (<10%).
+
+Why this works better than commit-based AI%:
+- Available for ALL users (not just the ~18% who commit through Cursor's Source Control)
+- Not affected by squash merges, initial commits, or external git tools
+- Validated by Cursor's own productivity research (accept rate correlates with developer proficiency) and the DX AI Measurement Framework (combine frequency + acceptance + consistency)
+- Actually differentiating: accept rate ranges 0-100% across real team data, engagement intensity ranges 2-130 reqs/day
+
+The commit-based AI% from `ai_code_commits` is shown as a secondary "AI Code %" metric with a caveat about attribution limitations.
 
 ## Daily Spend Data Sources
 

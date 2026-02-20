@@ -245,6 +245,33 @@ export interface ByUserCommandsResponse {
   params: Record<string, unknown>;
 }
 
+export interface AICodeCommit {
+  commitHash: string;
+  repoName: string;
+  branchName: string | null;
+  isPrimaryBranch: boolean | null;
+  totalLinesAdded: number;
+  totalLinesDeleted: number;
+  tabLinesAdded: number;
+  tabLinesDeleted: number;
+  composerLinesAdded: number;
+  composerLinesDeleted: number;
+  nonAiLinesAdded: number;
+  nonAiLinesDeleted: number;
+  message: string;
+  commitTs: string;
+  createdAt: string;
+  userId: string;
+  userEmail: string;
+}
+
+export interface AICodeCommitsResponse {
+  items: AICodeCommit[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface FilteredUsageEvent {
   timestamp: string;
   model: string;

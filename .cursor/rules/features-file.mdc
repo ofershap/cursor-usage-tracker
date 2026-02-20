@@ -1,0 +1,9 @@
+---
+description: Keep FEATURES.md up to date when adding new features
+globs: "src/app/**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# Feature Map Maintenance
+
+When adding a new user-facing feature (page, section, chart, badge, metric, setting, or API endpoint), update `FEATURES.md` to reflect the change. Keep entries short — one line per item, grouped under the correct page heading.

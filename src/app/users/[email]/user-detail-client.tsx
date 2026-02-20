@@ -1,19 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import {
-  RadarChart,
-  Radar,
-  PolarGrid,
-  PolarAngleAxis,
-  ResponsiveContainer,
-  Tooltip,
-} from "recharts";
 import { SpendTrendChart } from "@/components/charts/spend-trend-chart";
 import { formatDateShort } from "@/lib/date-utils";
 import { shortModel } from "@/lib/format-utils";
 import type { Anomaly } from "@/lib/types";
-import type { UsageBadge, SpendBadge, ContextBadge } from "@/lib/db";
+import type { UsageBadge, SpendBadge, ContextBadge, AdoptionBadge } from "@/lib/db";
 
 interface UserStats {
   member:
@@ -69,7 +61,30 @@ interface UserStats {
     usage: UsageBadge | null;
     spend: SpendBadge | null;
     context: ContextBadge | null;
+    adoption: AdoptionBadge | null;
   };
+  aiAdoption: {
+    score: number;
+    adoptionTier: string;
+    acceptRate: number;
+    intensity: number;
+    intensityNorm: number;
+    consistency: number;
+    agentRequests: number;
+    totalAccepts: number;
+    totalApplies: number;
+    activeDays: number;
+    periodDays: number;
+    commitData: {
+      totalCommits: number;
+      totalLinesAdded: number;
+      aiLinesAdded: number;
+      composerLinesAdded: number;
+      tabLinesAdded: number;
+      nonAiLinesAdded: number;
+      aiPercent: number;
+    } | null;
+  } | null;
 }
 
 interface UserDetailClientProps {
@@ -100,18 +115,8 @@ const BADGE_STYLES: Record<string, { label: string; color: string; tooltip: stri
     color: "bg-amber-600/20 text-amber-400",
     tooltip: "Uses max-context models",
   },
-  balanced: {
-    label: "Balanced",
-    color: "bg-zinc-600/20 text-zinc-400",
-    tooltip: "Moderate usage with standard models",
-  },
-  "tab-completer": {
-    label: "Tab Completer",
-    color: "bg-cyan-600/20 text-cyan-400",
-    tooltip: "Heavy tab completions",
-  },
   "light-user": {
-    label: "Light",
+    label: "Low Usage",
     color: "bg-zinc-700/20 text-zinc-500",
     tooltip: "Fewer than 10 agent requests",
   },
@@ -140,18 +145,37 @@ const BADGE_STYLES: Record<string, { label: string; color: string; tooltip: stri
     color: "bg-teal-600/20 text-teal-400",
     tooltip: "Avg context <300K tokens/req — efficient conversation patterns",
   },
+  "manual-coder": {
+    label: "Manual Coder",
+    color: "bg-red-600/20 text-red-400",
+    tooltip: "Less than 10% AI-generated code in commits",
+  },
+  "low-adoption": {
+    label: "Low Adoption",
+    color: "bg-orange-600/20 text-orange-400",
+    tooltip: "10-29% AI-generated code in commits",
+  },
+  "moderate-adoption": {
+    label: "Moderate AI",
+    color: "bg-amber-600/20 text-amber-400",
+    tooltip: "30-54% AI-generated code in commits",
+  },
+  "high-adoption": {
+    label: "High AI",
+    color: "bg-blue-600/20 text-blue-400",
+    tooltip: "55-79% AI-generated code in commits",
+  },
+  "ai-native": {
+    label: "AI-Native",
+    color: "bg-emerald-600/20 text-emerald-400",
+    tooltip: "80%+ AI-generated code in commits",
+  },
 };
 
 export function UserDetailClient({ email, stats }: UserDetailClientProps) {
   const currentSpend = stats.spending[0];
   const activityDays = stats.dailyActivity.length;
   const totalAgentRequests = stats.dailyActivity.reduce((sum, d) => sum + d.agent_requests, 0);
-  const totalAccepts = stats.dailyActivity.reduce((sum, d) => sum + d.total_accepts, 0);
-  const totalRejects = stats.dailyActivity.reduce((sum, d) => sum + d.total_rejects, 0);
-  const acceptRate =
-    totalAccepts + totalRejects > 0
-      ? Math.round((totalAccepts / (totalAccepts + totalRejects)) * 100)
-      : null;
   const totalSpendCents = stats.dailySpend.reduce((s, d) => s + d.spend_cents, 0);
   const totalSpendDollars = totalSpendCents / 100;
   const dollarsPerReq =
@@ -167,6 +191,7 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
   const userBadges: string[] = [];
   if (stats.badges.spend) userBadges.push(stats.badges.spend);
   if (stats.badges.context) userBadges.push(stats.badges.context);
+  if (stats.badges.adoption) userBadges.push(stats.badges.adoption);
   if (stats.badges.usage) userBadges.push(stats.badges.usage);
 
   return (
@@ -222,9 +247,13 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
         />
         <KpiCard label={`Agent Reqs (${activityDays}d)`} value={fmt(totalAgentRequests)} />
         <KpiCard
-          label="Accept Rate"
-          value={acceptRate != null ? `${acceptRate}%` : "—"}
-          sub="of agent diffs accepted"
+          label="Diffs Accepted"
+          value={stats.aiAdoption ? `${stats.aiAdoption.acceptRate}%` : "—"}
+          sub={
+            stats.aiAdoption
+              ? `${stats.aiAdoption.totalAccepts} of ${stats.aiAdoption.totalApplies} agent diffs`
+              : "Not enough data"
+          }
         />
         <KpiCard
           label="Team Rank"
@@ -250,7 +279,7 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
             };
           })}
         />
-        <UsageProfileRadar stats={stats} />
+        <AIAdoptionCard adoption={stats.aiAdoption} />
       </div>
 
       {hasUsageEvents && (
@@ -675,88 +704,119 @@ function ContextEfficiencyCard({ metrics }: { metrics: NonNullable<UserStats["co
   );
 }
 
-const RADAR_TOOLTIP_STYLE = {
-  backgroundColor: "#18181b",
-  border: "1px solid #3f3f46",
-  borderRadius: "6px",
-  fontSize: "11px",
-  color: "#fafafa",
-} as const;
+const TIER_STYLES: Record<
+  string,
+  { color: string; bg: string; bar: string; border: string; description: string }
+> = {
+  "AI-Native": {
+    color: "text-emerald-400",
+    bg: "bg-emerald-500",
+    bar: "bg-emerald-500",
+    border: "border-emerald-500/30",
+    description: "Heavily uses AI with high trust",
+  },
+  "High Adoption": {
+    color: "text-blue-400",
+    bg: "bg-blue-500",
+    bar: "bg-blue-500",
+    border: "border-blue-500/30",
+    description: "Strong AI usage, good acceptance",
+  },
+  Moderate: {
+    color: "text-amber-400",
+    bg: "bg-amber-500",
+    bar: "bg-amber-500",
+    border: "border-amber-500/30",
+    description: "Uses AI regularly but room to grow",
+  },
+  "Low Adoption": {
+    color: "text-orange-400",
+    bg: "bg-orange-500",
+    bar: "bg-orange-500",
+    border: "border-orange-500/30",
+    description: "Minimal AI usage detected",
+  },
+  Manual: {
+    color: "text-red-400",
+    bg: "bg-red-500",
+    bar: "bg-red-500",
+    border: "border-red-500/30",
+    description: "Rarely uses AI assistance",
+  },
+};
 
-function UsageProfileRadar({ stats }: { stats: UserStats }) {
-  const da = stats.dailyActivity;
-  const totalDays = da.length;
-  const activeDays = da.filter((d) => d.agent_requests > 0).length;
-  const totalReqs = da.reduce((s, d) => s + d.agent_requests, 0);
-  const totalTabs = da.reduce((s, d) => s + d.tabs_accepted, 0);
-  const totalAccepts = da.reduce((s, d) => s + d.total_accepts, 0);
-  const totalRejects = da.reduce((s, d) => s + d.total_rejects, 0);
-  const totalUsageBased = da.reduce((s, d) => s + d.usage_based_reqs, 0);
+function AIAdoptionCard({ adoption }: { adoption: UserStats["aiAdoption"] }) {
+  if (!adoption) {
+    return (
+      <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4 flex flex-col items-center justify-center min-h-[260px]">
+        <h3 className="text-xs font-medium text-zinc-400 mb-3">AI Adoption</h3>
+        <p className="text-zinc-500 text-xs text-center">
+          Not enough usage data.
+          <br />
+          <span className="text-zinc-600">Requires at least 10 agent requests.</span>
+        </p>
+      </div>
+    );
+  }
 
-  const activityPct = totalDays > 0 ? Math.round((activeDays / totalDays) * 100) : 0;
-  const reqsPerDay = activeDays > 0 ? Math.round(totalReqs / activeDays) : 0;
-  const intensityPct = Math.min(100, Math.round((reqsPerDay / 150) * 100));
-  const tabPct = totalReqs > 0 ? Math.min(100, Math.round((totalTabs / totalReqs) * 200)) : 0;
-  const radarAcceptRate =
-    totalAccepts + totalRejects > 0
-      ? Math.round((totalAccepts / (totalAccepts + totalRejects)) * 100)
-      : 0;
-  const overagePct = totalReqs > 0 ? Math.round((totalUsageBased / totalReqs) * 100) : 0;
-
-  const distinctMcpTools = stats.mcpSummary.length;
-  const distinctCommands = stats.commandsSummary.length;
-  const powerUserScore = Math.min(
-    100,
-    Math.round(((distinctMcpTools + distinctCommands) / 10) * 100),
-  );
-
-  const radarData = [
-    { axis: "Activity", value: activityPct, detail: `${activeDays}/${totalDays} days active` },
-    { axis: "Intensity", value: intensityPct, detail: `${reqsPerDay} reqs/active day` },
-    { axis: "Tab Usage", value: tabPct, detail: `${totalTabs} tab accepts` },
-    { axis: "Precision", value: radarAcceptRate, detail: `${radarAcceptRate}% accept rate` },
-    {
-      axis: "On Plan",
-      value: 100 - overagePct,
-      detail: `${100 - overagePct}% of requests covered by plan`,
-    },
-    {
-      axis: "Power User",
-      value: powerUserScore,
-      detail: `${distinctMcpTools} MCP tools, ${distinctCommands} commands`,
-    },
-  ];
+  const fallback = {
+    color: "text-amber-400",
+    bg: "bg-amber-500",
+    bar: "bg-amber-500",
+    border: "border-amber-500/30",
+    description: "",
+  };
+  const style = TIER_STYLES[adoption.adoptionTier] ?? fallback;
+  const reqsPerDay = Math.round(adoption.intensity);
 
   return (
-    <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-      <h3 className="text-xs font-medium text-zinc-400 mb-1">Usage Profile</h3>
-      <ResponsiveContainer width="100%" height={220}>
-        <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
-          <PolarGrid stroke="#3f3f46" />
-          <PolarAngleAxis dataKey="axis" tick={{ fontSize: 10, fill: "#a1a1aa" }} />
-          <Tooltip
-            contentStyle={RADAR_TOOLTIP_STYLE}
-            content={({ active, payload }) => {
-              if (!active || !payload?.length) return null;
-              const d = payload[0]?.payload as { axis: string; detail: string } | undefined;
-              if (!d) return null;
-              return (
-                <div style={RADAR_TOOLTIP_STYLE} className="px-3 py-2">
-                  <div className="text-zinc-300 font-medium">{d.axis}</div>
-                  <div className="text-zinc-400 mt-0.5">{d.detail}</div>
-                </div>
-              );
-            }}
-          />
-          <Radar
-            dataKey="value"
-            stroke="#3b82f6"
-            fill="#3b82f6"
-            fillOpacity={0.2}
-            strokeWidth={2}
-          />
-        </RadarChart>
-      </ResponsiveContainer>
+    <div className={`bg-zinc-900 rounded-lg border ${style.border} p-5 flex flex-col`}>
+      <h3 className="text-xs font-medium text-zinc-400 mb-4">AI Adoption</h3>
+
+      <div className="flex-1 flex flex-col justify-center">
+        <div className={`text-2xl font-bold ${style.color} leading-tight`}>
+          {adoption.adoptionTier}
+        </div>
+        <div className="text-xs text-zinc-500 mt-1 mb-3">{style.description}</div>
+
+        <div className="flex items-center gap-2.5 mb-5">
+          <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+            <div
+              className={`h-full rounded-full ${style.bar}`}
+              style={{ width: `${Math.min(adoption.score, 100)}%` }}
+            />
+          </div>
+          <span className={`text-sm font-semibold ${style.color} tabular-nums`}>
+            {adoption.score}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <div
+          className="bg-zinc-800/60 rounded-lg px-2 py-2.5 text-center cursor-default"
+          title={`${adoption.totalAccepts} of ${adoption.totalApplies} agent diffs accepted (includes dismissed)`}
+        >
+          <div className="text-sm font-semibold text-zinc-100">{adoption.acceptRate}%</div>
+          <div className="text-[10px] text-zinc-500 mt-0.5">diffs accepted</div>
+        </div>
+        <div
+          className="bg-zinc-800/60 rounded-lg px-2 py-2.5 text-center cursor-default"
+          title={`${adoption.agentRequests.toLocaleString()} total agent requests over ${adoption.activeDays} active days`}
+        >
+          <div className="text-sm font-semibold text-zinc-100">{reqsPerDay}/day</div>
+          <div className="text-[10px] text-zinc-500 mt-0.5">agent requests</div>
+        </div>
+        <div
+          className="bg-zinc-800/60 rounded-lg px-2 py-2.5 text-center cursor-default"
+          title={`Days with at least one agent request in the last ${adoption.periodDays} days`}
+        >
+          <div className="text-sm font-semibold text-zinc-100">
+            {adoption.activeDays}/{adoption.periodDays}
+          </div>
+          <div className="text-[10px] text-zinc-500 mt-0.5">active days</div>
+        </div>
+      </div>
     </div>
   );
 }

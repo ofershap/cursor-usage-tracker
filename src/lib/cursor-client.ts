@@ -6,6 +6,7 @@ import type {
   SpendResponse,
   GroupsResponse,
   FilteredUsageEventsResponse,
+  AICodeCommitsResponse,
   AnalyticsDAUResponse,
   AnalyticsModelUsageResponse,
   AnalyticsAgentEditsResponse,
@@ -233,6 +234,17 @@ export class CursorClient {
         pageSize: options.pageSize ?? 500,
       },
     });
+  }
+
+  async getAICodeCommits(
+    options: { startDate?: string; endDate?: string; page?: number; pageSize?: number } = {},
+  ): Promise<AICodeCommitsResponse> {
+    const params = new URLSearchParams();
+    params.set("startDate", options.startDate ?? "30d");
+    params.set("endDate", options.endDate ?? "today");
+    params.set("page", String(options.page ?? 1));
+    params.set("pageSize", String(options.pageSize ?? 500));
+    return this.request<AICodeCommitsResponse>(`/analytics/ai-code/commits?${params.toString()}`);
   }
 
   async getAnalyticsCommands(

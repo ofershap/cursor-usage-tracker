@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
-import type { RankedUser, UsageBadge, SpendBadge, ContextBadge } from "@/lib/db";
+import type { RankedUser, UsageBadge, SpendBadge, ContextBadge, AdoptionBadge } from "@/lib/db";
 import type { SortColumn } from "@/app/dashboard-client";
 import { shortModel } from "@/lib/format-utils";
 
@@ -43,16 +43,11 @@ const USAGE_BADGE_CONFIG: Record<UsageBadge, { label: string; color: string; too
   },
   balanced: {
     label: "Balanced",
-    color: "bg-zinc-600/20 text-zinc-400",
-    tooltip: "Moderate usage with standard models",
-  },
-  "tab-completer": {
-    label: "Tab Completer",
-    color: "bg-cyan-600/20 text-cyan-400",
-    tooltip: "Heavy use of tab completions alongside agent requests",
+    color: "bg-blue-600/20 text-blue-400",
+    tooltip: "Standard usage pattern — regular agent requests without extreme model or volume",
   },
   "light-user": {
-    label: "Light",
+    label: "Low Usage",
     color: "bg-zinc-700/20 text-zinc-500",
     tooltip: "Fewer than 10 agent requests in this period",
   },
@@ -92,20 +87,81 @@ const CONTEXT_BADGE_CONFIG: Record<
   },
 };
 
+const ADOPTION_BADGE_CONFIG: Record<
+  AdoptionBadge,
+  { label: string; color: string; tooltip: string }
+> = {
+  "manual-coder": {
+    label: "Manual Coder",
+    color: "bg-red-600/20 text-red-400",
+    tooltip: "Less than 10% AI-generated code in commits",
+  },
+  "low-adoption": {
+    label: "Low Adoption",
+    color: "bg-orange-600/20 text-orange-400",
+    tooltip: "10-29% AI-generated code in commits",
+  },
+  "moderate-adoption": {
+    label: "Moderate AI",
+    color: "bg-amber-600/20 text-amber-400",
+    tooltip: "30-54% AI-generated code in commits",
+  },
+  "high-adoption": {
+    label: "High AI",
+    color: "bg-blue-600/20 text-blue-400",
+    tooltip: "55-79% AI-generated code in commits",
+  },
+  "ai-native": {
+    label: "AI-Native",
+    color: "bg-emerald-600/20 text-emerald-400",
+    tooltip: "80%+ AI-generated code in commits",
+  },
+};
+
 function SortIcon({ active, asc }: { active: boolean; asc: boolean }) {
   if (!active) return <span className="text-zinc-700 ml-0.5">↕</span>;
   return <span className="text-blue-400 ml-0.5">{asc ? "↑" : "↓"}</span>;
 }
 
+type BadgeSection = "usage" | "spend" | "context" | "adoption";
+
+const BADGE_SECTIONS: {
+  key: BadgeSection;
+  label: string;
+  entries: [string, { label: string; color: string; tooltip: string }][];
+}[] = [
+  { key: "usage", label: "Usage", entries: Object.entries(USAGE_BADGE_CONFIG) },
+  { key: "spend", label: "Spend", entries: Object.entries(SPEND_BADGE_CONFIG) },
+  { key: "context", label: "Context", entries: Object.entries(CONTEXT_BADGE_CONFIG) },
+  { key: "adoption", label: "AI Adoption", entries: Object.entries(ADOPTION_BADGE_CONFIG) },
+];
+
+function sectionForBadge(badge: string): BadgeSection | null {
+  if (badge in USAGE_BADGE_CONFIG) return "usage";
+  if (badge in SPEND_BADGE_CONFIG) return "spend";
+  if (badge in CONTEXT_BADGE_CONFIG) return "context";
+  if (badge in ADOPTION_BADGE_CONFIG) return "adoption";
+  return null;
+}
+
 function BadgeLegend({
   badgeFilter,
   onBadgeFilter,
+  badgeCounts,
 }: {
   badgeFilter: string | null;
   onBadgeFilter: (badge: string | null) => void;
+  badgeCounts: Record<string, number>;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean } | null>(null);
+
+  const activeSection = badgeFilter ? sectionForBadge(badgeFilter) : null;
+  const [expanded, setExpanded] = useState<Set<BadgeSection>>(
+    activeSection ? new Set([activeSection]) : new Set(),
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -116,6 +172,34 @@ function BadgeLegend({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
+  useEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const dropdownHeight = 300;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < dropdownHeight && rect.top > spaceBelow;
+    setPos({
+      top: openUp ? rect.top : rect.bottom + 4,
+      left: Math.max(8, rect.right - 320),
+      openUp,
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      setExpanded(activeSection ? new Set([activeSection]) : new Set());
+    }
+  }, [open, activeSection]);
+
+  function toggleSection(section: BadgeSection) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
+    });
+  }
+
   function handleBadgeClick(key: string) {
     onBadgeFilter(badgeFilter === key ? null : key);
     setOpen(false);
@@ -123,15 +207,19 @@ function BadgeLegend({
 
   function renderBadgeItem(key: string, cfg: { label: string; color: string; tooltip: string }) {
     const isActive = badgeFilter === key;
+    const count = badgeCounts[key] ?? 0;
     return (
       <button
         key={key}
         onClick={() => handleBadgeClick(key)}
         className={`w-full text-left rounded px-2 py-1 transition-colors cursor-pointer ${isActive ? "bg-blue-500/20 ring-1 ring-blue-500/40" : "bg-zinc-800/50 hover:bg-zinc-700/50"}`}
       >
-        <span className={`${cfg.color} px-1.5 py-0.5 rounded text-[10px] font-medium`}>
-          {cfg.label}
-        </span>
+        <div className="flex items-center justify-between">
+          <span className={`${cfg.color} px-1.5 py-0.5 rounded text-[10px] font-medium`}>
+            {cfg.label}
+          </span>
+          {count > 0 && <span className="text-[9px] text-zinc-500 font-mono">{count}</span>}
+        </div>
         <div className="text-[9px] text-zinc-500 mt-0.5 leading-snug">{cfg.tooltip}</div>
       </button>
     );
@@ -140,47 +228,58 @@ function BadgeLegend({
   return (
     <div className="relative inline-block" ref={ref}>
       <button
+        ref={buttonRef}
         onClick={() => setOpen((v) => !v)}
-        className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full border border-zinc-600 text-zinc-500 hover:text-zinc-300 hover:border-zinc-400 transition-colors text-[9px] leading-none font-medium cursor-pointer"
-        aria-label="Badge legend"
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+          open || badgeFilter
+            ? "bg-blue-500/20 text-blue-400 border border-blue-500/40"
+            : "bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-300 hover:border-zinc-600"
+        }`}
+        aria-label="Filter by badge"
       >
-        i
+        Badges
+        <span className={`text-xs transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
       </button>
-      {open && (
-        <div className="absolute right-0 top-6 z-50 w-80 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-2 text-left">
-          <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-1">
-            Usage
-          </div>
-          <div className="space-y-0.5">
-            {(
-              Object.entries(USAGE_BADGE_CONFIG) as [
-                UsageBadge,
-                (typeof USAGE_BADGE_CONFIG)[UsageBadge],
-              ][]
-            ).map(([key, cfg]) => renderBadgeItem(key, cfg))}
-          </div>
-          <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mt-2 mb-1">
-            Spend
-          </div>
-          <div className="space-y-0.5">
-            {(
-              Object.entries(SPEND_BADGE_CONFIG) as [
-                SpendBadge,
-                (typeof SPEND_BADGE_CONFIG)[SpendBadge],
-              ][]
-            ).map(([key, cfg]) => renderBadgeItem(key, cfg))}
-          </div>
-          <div className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mt-2 mb-1">
-            Context
-          </div>
-          <div className="space-y-0.5">
-            {(
-              Object.entries(CONTEXT_BADGE_CONFIG) as [
-                ContextBadge,
-                (typeof CONTEXT_BADGE_CONFIG)[ContextBadge],
-              ][]
-            ).map(([key, cfg]) => renderBadgeItem(key, cfg))}
-          </div>
+      {open && pos && (
+        <div
+          className="fixed z-[100] w-80 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-2 text-left max-h-[calc(100vh-16px)] overflow-y-auto"
+          style={{
+            left: pos.left,
+            ...(pos.openUp ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top }),
+          }}
+        >
+          {BADGE_SECTIONS.map((section, i) => {
+            const isExpanded = expanded.has(section.key);
+            const hasActiveBadge = badgeFilter
+              ? section.entries.some(([k]) => k === badgeFilter)
+              : false;
+            return (
+              <div key={section.key} className={i > 0 ? "mt-1" : ""}>
+                <button
+                  onClick={() => toggleSection(section.key)}
+                  className="w-full flex items-center justify-between py-1 px-1 rounded hover:bg-zinc-800/50 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+                      {section.label}
+                    </span>
+                    <span className="text-[9px] text-zinc-600">{section.entries.length}</span>
+                    {hasActiveBadge && <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />}
+                  </div>
+                  <span
+                    className={`text-zinc-500 text-xs transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                  >
+                    ▾
+                  </span>
+                </button>
+                {isExpanded && (
+                  <div className="space-y-0.5 mt-0.5">
+                    {section.entries.map(([key, cfg]) => renderBadgeItem(key, cfg))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -215,8 +314,19 @@ export function MembersTable({
   const activeBadgeCfg = badgeFilter
     ? (USAGE_BADGE_CONFIG[badgeFilter as UsageBadge] ??
       SPEND_BADGE_CONFIG[badgeFilter as SpendBadge] ??
-      CONTEXT_BADGE_CONFIG[badgeFilter as ContextBadge])
+      CONTEXT_BADGE_CONFIG[badgeFilter as ContextBadge] ??
+      ADOPTION_BADGE_CONFIG[badgeFilter as AdoptionBadge])
     : null;
+
+  const badgeCounts: Record<string, number> = {};
+  for (const row of data) {
+    if (row.usage_badge) badgeCounts[row.usage_badge] = (badgeCounts[row.usage_badge] ?? 0) + 1;
+    if (row.spend_badge) badgeCounts[row.spend_badge] = (badgeCounts[row.spend_badge] ?? 0) + 1;
+    if (row.context_badge)
+      badgeCounts[row.context_badge] = (badgeCounts[row.context_badge] ?? 0) + 1;
+    if (row.adoption_badge)
+      badgeCounts[row.adoption_badge] = (badgeCounts[row.adoption_badge] ?? 0) + 1;
+  }
 
   return (
     <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
@@ -242,7 +352,11 @@ export function MembersTable({
             </span>
           )}
         </div>
-        <BadgeLegend badgeFilter={badgeFilter} onBadgeFilter={onBadgeFilter} />
+        <BadgeLegend
+          badgeFilter={badgeFilter}
+          onBadgeFilter={onBadgeFilter}
+          badgeCounts={badgeCounts}
+        />
       </div>
       <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
         <table className="w-full text-sm">
@@ -364,30 +478,64 @@ export function MembersTable({
                   </td>
                   <td className="text-center px-4 py-2.5">
                     <div className="flex items-center justify-center gap-1 flex-wrap">
-                      {row.usage_badge && (
-                        <span
-                          className={`${USAGE_BADGE_CONFIG[row.usage_badge].color} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap`}
-                          title={USAGE_BADGE_CONFIG[row.usage_badge].tooltip}
-                        >
-                          {USAGE_BADGE_CONFIG[row.usage_badge].label}
-                        </span>
-                      )}
-                      {row.spend_badge && (
-                        <span
-                          className={`${SPEND_BADGE_CONFIG[row.spend_badge].color} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap`}
-                          title={SPEND_BADGE_CONFIG[row.spend_badge].tooltip}
-                        >
-                          {SPEND_BADGE_CONFIG[row.spend_badge].label}
-                        </span>
-                      )}
-                      {row.context_badge && (
-                        <span
-                          className={`${CONTEXT_BADGE_CONFIG[row.context_badge].color} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap`}
-                          title={CONTEXT_BADGE_CONFIG[row.context_badge].tooltip}
-                        >
-                          {CONTEXT_BADGE_CONFIG[row.context_badge].label}
-                        </span>
-                      )}
+                      {(() => {
+                        const allBadges: {
+                          key: string;
+                          cfg: { label: string; color: string; tooltip: string };
+                          priority: number;
+                        }[] = [];
+                        if (row.spend_badge)
+                          allBadges.push({
+                            key: row.spend_badge,
+                            cfg: SPEND_BADGE_CONFIG[row.spend_badge],
+                            priority: 0,
+                          });
+                        if (row.context_badge)
+                          allBadges.push({
+                            key: row.context_badge,
+                            cfg: CONTEXT_BADGE_CONFIG[row.context_badge],
+                            priority: 1,
+                          });
+                        if (row.adoption_badge)
+                          allBadges.push({
+                            key: row.adoption_badge,
+                            cfg: ADOPTION_BADGE_CONFIG[row.adoption_badge],
+                            priority: 2,
+                          });
+                        if (row.usage_badge)
+                          allBadges.push({
+                            key: row.usage_badge,
+                            cfg: USAGE_BADGE_CONFIG[row.usage_badge],
+                            priority: 3,
+                          });
+                        allBadges.sort((a, b) => a.priority - b.priority);
+                        const shown = allBadges.slice(0, 2);
+                        const extra = allBadges.length - shown.length;
+                        return (
+                          <>
+                            {shown.map((b) => (
+                              <span
+                                key={b.key}
+                                className={`${b.cfg.color} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap`}
+                                title={b.cfg.tooltip}
+                              >
+                                {b.cfg.label}
+                              </span>
+                            ))}
+                            {extra > 0 && (
+                              <span
+                                className="text-[9px] text-zinc-600"
+                                title={allBadges
+                                  .slice(2)
+                                  .map((b) => b.cfg.label)
+                                  .join(", ")}
+                              >
+                                +{extra}
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </td>
                   <td className="text-center px-4 py-2.5">

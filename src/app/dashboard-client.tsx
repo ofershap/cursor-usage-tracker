@@ -139,10 +139,13 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
     "premium-model": "cpr",
     "cost-efficient": "cpr",
     "power-user": "reqs",
-    "tab-completer": "reqs",
     "deep-thinker": "spend",
     "light-user": "reqs",
-    balanced: "reqs",
+    "manual-coder": "lines",
+    "low-adoption": "lines",
+    "moderate-adoption": "lines",
+    "high-adoption": "lines",
+    "ai-native": "lines",
   };
 
   const handleBadgeFilter = useCallback(
@@ -178,7 +181,8 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
         (u) =>
           u.usage_badge === badgeFilter ||
           u.spend_badge === badgeFilter ||
-          u.context_badge === badgeFilter,
+          u.context_badge === badgeFilter ||
+          u.adoption_badge === badgeFilter,
       );
     }
     const sorted = [...users].sort((a, b) => {
