@@ -5,11 +5,15 @@
 <h1 align="center">Cursor Usage Tracker</h1>
 
 <p align="center">
-  Know who's burning through your AI budget before the invoice tells you. Open-source Cursor Enterprise cost monitoring with anomaly detection, Slack alerts, and spend analytics.
+  Open-source cost monitoring for Cursor Enterprise teams. Track AI spend per developer, detect anomalies automatically, and get Slack alerts before the invoice surprises you. Self-host with Docker or <a href="https://cursor-usage-tracker.sticklight.app">let us run it for you</a>.
 </p>
 
 <p align="center">
-  <a href="https://cursor-usage-tracker.sticklight.app">Website</a> · <a href="#quick-start">Quick Start</a> · <a href="#deploy">Deploy</a> · <a href="#features">Features</a>
+  <a href="https://cursor-usage-tracker.sticklight.app"><img src="https://img.shields.io/badge/🌐_Website-Hosted_&_Managed-6366f1?style=for-the-badge" alt="Website — Hosted & Managed" /></a>
+  &nbsp;
+  <a href="#quick-start"><img src="https://img.shields.io/badge/Quick_Start-grey?style=for-the-badge" alt="Quick Start" /></a>
+  &nbsp;
+  <a href="#features"><img src="https://img.shields.io/badge/Features-grey?style=for-the-badge" alt="Features" /></a>
 </p>
 
 <p align="center">
@@ -24,14 +28,6 @@
 
 ---
 
-## Why This Exists
-
-This dashboard answers three questions:
-
-1. **Cost monitoring** - Are we spending too much? Who's driving it? Why?
-2. **Adoption tracking** - Is everyone using the tool we're paying for?
-3. **Usage understanding** - How is each person working with AI?
-
 ## AI Spend Is a Blind Spot
 
 Engineering costs used to be two things: headcount and cloud infrastructure. You had tools for both. Then AI coding assistants showed up, and suddenly there's a third cost center that nobody has good tooling for.
@@ -41,6 +37,12 @@ A single developer on Cursor can burn through hundreds of dollars a day just by 
 Cursor's admin dashboard shows you the raw numbers, but it won't tell you when something is off. No anomaly detection. No alerts. No incident tracking. You find out about cost spikes when the invoice lands, weeks after the damage is done.
 
 I built cursor-usage-tracker to fix that. It sits on top of Cursor's Enterprise APIs and gives engineering managers, finance, and platform teams actual visibility into AI spend before it becomes a surprise.
+
+## What This Dashboard Answers
+
+1. **Cost monitoring** - Are we spending too much? Who's driving it? Why?
+2. **Adoption tracking** - Is everyone using the tool we're paying for?
+3. **Usage understanding** - How is each person working with AI?
 
 ---
 
@@ -113,6 +115,8 @@ Anomaly Detected ──→ Alert Sent ──→ Acknowledged ──→ Resolved
 | **User Drilldown** | Per-user token timeline, model breakdown, feature usage, activity profile, anomaly history                                                                          |
 | **Anomalies**      | Open incidents, MTTD/MTTI/MTTR metrics, full anomaly timeline                                                                                                       |
 | **Settings**       | Detection thresholds, **billing group management** (rename, assign, create), **HiBob CSV import** with change preview                                               |
+
+> For a detailed breakdown of every section, metric, badge, and chart, see [FEATURES.md](FEATURES.md).
 
 ---
 
