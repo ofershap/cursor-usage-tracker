@@ -101,10 +101,19 @@ Anomaly Detected ──→ Alert Sent ──→ Acknowledged ──→ Resolved
 - **MTTI** (Mean Time to Identify): how fast a human acknowledges it
 - **MTTR** (Mean Time to Resolve): how fast it gets fixed
 
-### Rich Alerting
+### Proactive Slack Notifications
 
-- **Slack**: Block Kit messages via bot token (`chat.postMessage`) with severity, user, model, value vs threshold, and dashboard links. Batches alerts automatically (individual messages for 1-3 anomalies, single summary for 4+).
-- **Email**: HTML-formatted alerts via [Resend](https://resend.com) (one API key, no SMTP config)
+You don't need to remember to check the dashboard. The system comes to you.
+
+| Notification        | When it fires                    | What you learn                                                                      |
+| ------------------- | -------------------------------- | ----------------------------------------------------------------------------------- |
+| **Anomaly alerts**  | Within the hour                  | "Alice's daily spend spiked to $214 (4.2x her 7-day avg)"                           |
+| **Plan exhaustion** | Daily, when users exceed plan    | "65/151 active users have exceeded their included plan this cycle"                  |
+| **Cycle summary**   | 3 days before billing cycle ends | Total spend, unused seats, top spenders, adoption breakdown, cycle-over-cycle trend |
+
+Anomaly alerts include severity, user, model, value vs threshold, and a direct link to the user's dashboard page. Cycle summaries tell you how many seats are going unused and who's driving cost — so you can act before the invoice, not after.
+
+Also supports **email alerts** via [Resend](https://resend.com) (one API key, no SMTP config).
 
 ### Web Dashboard
 

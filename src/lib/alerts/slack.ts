@@ -1,4 +1,5 @@
 import type { Anomaly, Incident } from "../types";
+import type { CycleSummaryData } from "../db";
 
 const SLACK_API_URL = "https://slack.com/api/chat.postMessage";
 const BATCH_THRESHOLD = 3;
@@ -226,58 +227,117 @@ export async function sendSlackAlert(
   return postToSlack(token, channel, text, blocks);
 }
 
-export async function sendDailySummary(
-  summary: {
-    totalSpendDollars: number;
-    limitedUsersCount: number;
-    newPlanExhausted: number;
-    totalPlanExhausted: number;
-    totalActive: number;
-    topSpenders: Array<{ name: string; spend: number }>;
-    openAnomalies: number;
-    budgetThreshold?: number;
-  },
-  options: { dashboardUrl?: string; cursorDashboardUrl?: string } = {},
+export async function sendPlanExhaustionAlert(
+  summary: { totalPlanExhausted: number; totalActive: number },
+  options: { dashboardUrl?: string } = {},
 ): Promise<boolean> {
   const token = process.env.SLACK_BOT_TOKEN;
   const channel = process.env.SLACK_CHANNEL_ID;
   if (!token || !channel) {
-    console.warn("[slack] Skipping daily summary - missing SLACK_BOT_TOKEN or SLACK_CHANNEL_ID");
-    return false;
-  }
-
-  const s = summary;
-  const lines: string[] = [];
-
-  lines.push(`*Team Spend:* $${s.totalSpendDollars.toLocaleString()} this cycle`);
-  if (s.budgetThreshold && s.budgetThreshold > 0) {
-    const pct = Math.round((s.totalSpendDollars / s.budgetThreshold) * 100);
-    lines.push(`*Budget:* ${pct}% of $${s.budgetThreshold.toLocaleString()} threshold`);
-  }
-  lines.push(
-    `*Plan Exhaustion:* ${s.totalPlanExhausted}/${s.totalActive} users exceeded plan${s.newPlanExhausted > 0 ? ` (+${s.newPlanExhausted} new today)` : ""}`,
-  );
-  if (s.limitedUsersCount > 0) {
-    lines.push(
-      `:rotating_light: *${s.limitedUsersCount} members limited* - unable to make requests`,
+    console.warn(
+      "[slack] Skipping plan exhaustion alert - missing SLACK_BOT_TOKEN or SLACK_CHANNEL_ID",
     );
-  }
-  if (s.openAnomalies > 0) {
-    lines.push(`*Open Anomalies:* ${s.openAnomalies}`);
-  }
-
-  if (s.topSpenders.length > 0) {
-    lines.push("");
-    lines.push("*Top Spenders (cycle):*");
-    for (const t of s.topSpenders.slice(0, 5)) {
-      lines.push(`  ${t.name}: $${t.spend.toLocaleString()}`);
-    }
+    return false;
   }
 
   const blocks: SlackBlock[] = [
     {
       type: "header",
-      text: { type: "plain_text", text: ":bar_chart: Cursor Usage - Daily Summary", emoji: true },
+      text: { type: "plain_text", text: ":zap: Cursor — Plan Exhaustion Alert", emoji: true },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*${summary.totalPlanExhausted}/${summary.totalActive}* active users have exceeded their included plan this cycle`,
+      },
+    },
+  ];
+
+  if (options.dashboardUrl) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `<${options.dashboardUrl}|View dashboard>` },
+    });
+  }
+
+  blocks.push({
+    type: "context",
+    elements: [
+      { type: "mrkdwn", text: `${new Date().toISOString().split("T")[0]} · cursor-usage-tracker` },
+    ],
+  });
+
+  return postToSlack(
+    token,
+    channel,
+    `Cursor — ${summary.totalPlanExhausted} users exceeded plan`,
+    blocks,
+  );
+}
+
+export async function sendCycleSummary(
+  data: CycleSummaryData,
+  options: { dashboardUrl?: string } = {},
+): Promise<boolean> {
+  const token = process.env.SLACK_BOT_TOKEN;
+  const channel = process.env.SLACK_CHANNEL_ID;
+  if (!token || !channel) {
+    console.warn("[slack] Skipping cycle summary - missing SLACK_BOT_TOKEN or SLACK_CHANNEL_ID");
+    return false;
+  }
+
+  const lines: string[] = [];
+
+  lines.push(`*Cycle Spend:* $${data.totalSpendDollars.toLocaleString()}`);
+  if (data.previousCycleSpendDollars !== null) {
+    const delta = data.totalSpendDollars - data.previousCycleSpendDollars;
+    const pct =
+      data.previousCycleSpendDollars > 0
+        ? Math.round((delta / data.previousCycleSpendDollars) * 100)
+        : 0;
+    const arrow = delta >= 0 ? "↑" : "↓";
+    lines.push(
+      `*vs Last Cycle:* $${data.previousCycleSpendDollars.toLocaleString()} (${delta >= 0 ? "+" : ""}${pct}% ${arrow})`,
+    );
+  }
+
+  lines.push("");
+  const utilizationPct =
+    data.totalMembers > 0 ? Math.round((data.activeMembers / data.totalMembers) * 100) : 0;
+  lines.push(`*Seats:* ${data.activeMembers}/${data.totalMembers} active (${utilizationPct}%)`);
+  if (data.unusedSeats > 0) {
+    lines.push(`:warning: ${data.unusedSeats} unused seats this cycle`);
+  }
+
+  if (data.planExhausted.exhausted > 0) {
+    lines.push(
+      `*Plan Exhaustion:* ${data.planExhausted.exhausted}/${data.planExhausted.totalActive} users exceeded plan`,
+    );
+  }
+
+  if (data.topSpenders.length > 0) {
+    lines.push("");
+    lines.push("*Top Spenders:*");
+    data.topSpenders.slice(0, 5).forEach((t, i) => {
+      lines.push(`  ${i + 1}. ${t.name}: $${t.spendDollars.toLocaleString()}`);
+    });
+  }
+
+  const { adoptionTiers: a } = data;
+  lines.push("");
+  lines.push(
+    `*Adoption:* AI-Native: ${a.aiNative} · High: ${a.high} · Moderate: ${a.moderate} · Low: ${a.low}`,
+  );
+
+  const blocks: SlackBlock[] = [
+    {
+      type: "header",
+      text: {
+        type: "plain_text",
+        text: `:bar_chart: Cursor Cycle Summary — Ending ${data.cycleEnd}`,
+        emoji: true,
+      },
     },
     {
       type: "section",
@@ -288,24 +348,32 @@ export async function sendDailySummary(
   const links: string[] = [];
   if (options.dashboardUrl) {
     links.push(`<${options.dashboardUrl}|Dashboard>`);
-    links.push(`<${options.dashboardUrl}/anomalies|Anomalies>`);
     links.push(`<${options.dashboardUrl}/insights|Insights>`);
   }
-  links.push(`<${options.cursorDashboardUrl ?? "https://cursor.com/dashboard"}|Cursor Dashboard>`);
 
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: links.join(" · ") },
-  });
+  if (links.length > 0) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: links.join(" · ") },
+    });
+  }
 
   blocks.push({
     type: "context",
     elements: [
-      { type: "mrkdwn", text: `${new Date().toISOString().split("T")[0]} · cursor-usage-tracker` },
+      {
+        type: "mrkdwn",
+        text: `Cycle ${data.cycleStart} – ${data.cycleEnd} · ${data.daysRemaining} days remaining · cursor-usage-tracker`,
+      },
     ],
   });
 
-  return postToSlack(token, channel, "Cursor Usage - Daily Summary", blocks);
+  return postToSlack(
+    token,
+    channel,
+    `Cursor Cycle Summary — $${data.totalSpendDollars.toLocaleString()} spend, ${data.unusedSeats} unused seats`,
+    blocks,
+  );
 }
 
 export async function sendSlackBatch(

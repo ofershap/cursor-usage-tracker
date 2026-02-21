@@ -2770,3 +2770,165 @@ export function getPlanExhaustionStats(): {
     users,
   };
 }
+
+export interface CycleSummaryData {
+  cycleStart: string;
+  cycleEnd: string;
+  daysRemaining: number;
+  totalSpendDollars: number;
+  previousCycleSpendDollars: number | null;
+  totalMembers: number;
+  activeMembers: number;
+  unusedSeats: number;
+  planExhausted: { exhausted: number; totalActive: number };
+  topSpenders: Array<{ name: string; spendDollars: number }>;
+  adoptionTiers: { aiNative: number; high: number; moderate: number; low: number; manual: number };
+}
+
+export function getCycleSummaryData(): CycleSummaryData | null {
+  const db = getDb();
+
+  const cycleStart = getMetadata("cycle_start");
+  const cycleEnd = getMetadata("cycle_end");
+  if (!cycleStart || !cycleEnd) return null;
+
+  const daysRemaining = Math.max(
+    0,
+    Math.ceil((new Date(cycleEnd).getTime() - Date.now()) / 86_400_000),
+  );
+
+  const totalMembers =
+    (db.prepare("SELECT COUNT(*) as c FROM members WHERE is_removed = 0").get() as { c: number })
+      ?.c ?? 0;
+
+  const activeMembers =
+    (
+      db
+        .prepare(
+          "SELECT COUNT(DISTINCT email) as c FROM daily_usage WHERE is_active = 1 AND date >= ?",
+        )
+        .get(cycleStart) as { c: number }
+    )?.c ?? 0;
+
+  const hasUE = (db.prepare("SELECT COUNT(*) as c FROM usage_events").get() as { c: number }).c > 0;
+
+  const totalSpendCents = hasUE
+    ? (
+        db.prepare("SELECT COALESCE(ROUND(SUM(total_cents)), 0) as t FROM usage_events").get() as {
+          t: number;
+        }
+      ).t
+    : (
+        db
+          .prepare(
+            `SELECT COALESCE(SUM(spend_cents), 0) as t FROM (
+          SELECT email, MAX(spend_cents) as spend_cents FROM spending
+          WHERE cycle_start = ? GROUP BY email)`,
+          )
+          .get(cycleStart) as { t: number }
+      ).t;
+
+  const prevCycleRow = db
+    .prepare(
+      `SELECT cycle_start, SUM(spend_cents) as total
+       FROM spending
+       WHERE cycle_start < ?
+       GROUP BY cycle_start
+       ORDER BY cycle_start DESC
+       LIMIT 1`,
+    )
+    .get(cycleStart) as { cycle_start: string; total: number } | undefined;
+
+  const topSpenders = hasUE
+    ? (db
+        .prepare(
+          `SELECT COALESCE(m.name, ue.user_email) as name, ROUND(SUM(ue.total_cents)) as spend
+           FROM usage_events ue LEFT JOIN members m ON ue.user_email = m.email
+           GROUP BY ue.user_email HAVING spend > 0
+           ORDER BY spend DESC LIMIT 5`,
+        )
+        .all() as Array<{ name: string; spend: number }>)
+    : (db
+        .prepare(
+          `SELECT COALESCE(m.name, s.email) as name, s.spend_cents as spend
+           FROM spending s LEFT JOIN members m ON s.email = m.email
+           WHERE s.cycle_start = ? AND s.spend_cents > 0
+           ORDER BY s.spend_cents DESC LIMIT 5`,
+        )
+        .all(cycleStart) as Array<{ name: string; spend: number }>);
+
+  const adoptionRows = db
+    .prepare(
+      `WITH cycle_stats AS (
+        SELECT email,
+          SUM(agent_requests) as total_reqs,
+          SUM(total_applies) as total_applies,
+          SUM(total_accepts) as total_accepts,
+          COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days,
+          CAST(julianday(?) - julianday(?) AS INT) as period_days
+        FROM daily_usage
+        WHERE date >= ?
+        GROUP BY email
+        HAVING total_reqs >= 10
+      ),
+      team_p90 AS (
+        SELECT MAX(rpd) as p90 FROM (
+          SELECT total_reqs * 1.0 / active_days as rpd
+          FROM cycle_stats WHERE active_days > 0
+          ORDER BY rpd
+          LIMIT (SELECT MAX(1, CAST(COUNT(*) * 0.9 AS INT)) FROM cycle_stats WHERE active_days > 0)
+        )
+      ),
+      scored AS (
+        SELECT
+          (CASE WHEN cs.total_applies > 0 THEN cs.total_accepts * 100.0 / cs.total_applies ELSE 0 END) * 0.4
+          + (CASE WHEN tp.p90 > 0 AND cs.active_days > 0
+              THEN MIN((cs.total_reqs * 1.0 / cs.active_days) / tp.p90 * 100, 100) ELSE 0 END) * 0.4
+          + (CASE WHEN cs.period_days > 0 THEN cs.active_days * 100.0 / cs.period_days ELSE 0 END) * 0.2
+          as score
+        FROM cycle_stats cs, team_p90 tp
+      )
+      SELECT
+        SUM(CASE WHEN score >= 80 THEN 1 ELSE 0 END) as ai_native,
+        SUM(CASE WHEN score >= 55 AND score < 80 THEN 1 ELSE 0 END) as high,
+        SUM(CASE WHEN score >= 30 AND score < 55 THEN 1 ELSE 0 END) as moderate,
+        SUM(CASE WHEN score >= 10 AND score < 30 THEN 1 ELSE 0 END) as low,
+        SUM(CASE WHEN score < 10 THEN 1 ELSE 0 END) as manual
+      FROM scored`,
+    )
+    .get(cycleEnd, cycleStart, cycleStart) as {
+    ai_native: number;
+    high: number;
+    moderate: number;
+    low: number;
+    manual: number;
+  };
+
+  const planStats = getPlanExhaustionStats();
+
+  return {
+    cycleStart,
+    cycleEnd,
+    daysRemaining,
+    totalSpendDollars: Math.round(totalSpendCents / 100),
+    previousCycleSpendDollars: prevCycleRow ? Math.round(prevCycleRow.total / 100) : null,
+    totalMembers,
+    activeMembers,
+    unusedSeats: totalMembers - activeMembers,
+    planExhausted: {
+      exhausted: planStats.summary.users_exhausted,
+      totalActive: planStats.summary.total_active,
+    },
+    topSpenders: topSpenders.map((t) => ({
+      name: t.name,
+      spendDollars: Math.round(t.spend / 100),
+    })),
+    adoptionTiers: {
+      aiNative: adoptionRows?.ai_native ?? 0,
+      high: adoptionRows?.high ?? 0,
+      moderate: adoptionRows?.moderate ?? 0,
+      low: adoptionRows?.low ?? 0,
+      manual: adoptionRows?.manual ?? 0,
+    },
+  };
+}
