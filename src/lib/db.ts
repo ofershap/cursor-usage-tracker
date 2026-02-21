@@ -1218,7 +1218,7 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     cycleEnd,
     cycleDays,
     dailyTeamActivity,
-    rankedUsers: assignBadges(rankedUsers).map((u, i) => ({ ...u, rank: i + 1 })),
+    rankedUsers: assignBadges(rankedUsers, days).map((u, i) => ({ ...u, rank: i + 1 })),
   };
 
   return { days, stats, modelCosts, teamDailySpend, dailySpendBreakdown };
@@ -1247,6 +1247,7 @@ function assignBadges(
     spend_rank: number;
     activity_rank: number;
   }>,
+  periodDays: number = 7,
 ): Array<
   (typeof users)[number] & {
     usage_badge: UsageBadge | null;
@@ -1255,7 +1256,6 @@ function assignBadges(
     adoption_badge: AdoptionBadge | null;
   }
 > {
-  const maxActiveDays = Math.max(...users.map((u) => u.active_days), 1);
   const activeUsersForIntensity = users.filter((u) => u.agent_requests >= 10 && u.active_days > 0);
   const intensities = activeUsersForIntensity
     .map((u) => u.agent_requests / u.active_days)
@@ -1331,7 +1331,7 @@ function assignBadges(
       const acceptRate = u.total_applies > 0 ? u.total_accepts / u.total_applies : 0;
       const intensity = u.agent_requests / u.active_days;
       const intensityNorm = Math.min(intensity / p90Intensity, 1);
-      const consistency = u.active_days / maxActiveDays;
+      const consistency = periodDays > 0 ? u.active_days / periodDays : 0;
       const score = acceptRate * 40 + intensityNorm * 40 + consistency * 20;
       if (score >= 80) adoption_badge = "ai-native";
       else if (score >= 55) adoption_badge = "high-adoption";

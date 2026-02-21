@@ -75,7 +75,7 @@ const STORY_MEMBERS: StoryMember[] = [
     userId: "usr_marcus001",
     storyRole: "expensive_model",
     activityLevel: "high",
-    primaryModel: "claude-4.5-opus-high",
+    primaryModel: "claude-4.6-opus-high",
     clientVersion: "2.5.12",
     group: "Backend > API",
   },
@@ -199,24 +199,27 @@ const MODELS = [
   "gpt-5.3-codex",
   "claude-4.5-sonnet-thinking",
   "claude-4.6-opus-high-thinking-fast",
+  "claude-4.6-opus-max-thinking",
 ];
 
-const MODEL_WEIGHTS = [20, 15, 8, 12, 10, 10, 5, 5, 5, 5, 3, 2, 0];
+const MODEL_WEIGHTS = [20, 15, 4, 12, 10, 10, 5, 5, 5, 5, 3, 2, 0, 4];
 
 const MODEL_COST_PER_REQ: Record<string, number> = {
-  "claude-4.5-sonnet": 0.18,
-  "claude-4.6-opus-high": 1.03,
-  "claude-4.6-opus-max": 1.26,
-  "claude-4.5-haiku": 0.05,
-  "claude-4.6-opus-high-thinking": 2.8,
-  "gpt-5.2": 0.45,
-  "claude-4.5-opus-high-thinking": 0.42,
-  "gpt-5.2-codex": 0.65,
-  "gemini-3-pro-preview": 0.35,
-  "gemini-3-flash-preview": 0.12,
-  "gpt-5.3-codex": 0.85,
-  "claude-4.5-sonnet-thinking": 0.55,
+  "claude-4.5-sonnet": 0.06,
+  "claude-4.6-opus-high": 0.38,
+  "claude-4.6-opus-max": 4.5,
+  "claude-4.5-haiku": 0.015,
+  "claude-4.6-opus-high-thinking": 0.8,
+  "gpt-5.2": 0.18,
+  "claude-4.5-opus-high": 0.35,
+  "claude-4.5-opus-high-thinking": 0.3,
+  "gpt-5.2-codex": 0.22,
+  "gemini-3-pro-preview": 0.12,
+  "gemini-3-flash-preview": 0.03,
+  "gpt-5.3-codex": 0.32,
+  "claude-4.5-sonnet-thinking": 0.18,
   "claude-4.6-opus-high-thinking-fast": 14.55,
+  "claude-4.6-opus-max-thinking": 7.8,
 };
 
 const GROUPS = [
@@ -1414,18 +1417,19 @@ function generateNormalDay(user: StoryMember, date: string, isWeekend: boolean):
   const agentReqs = baseReqs;
   const chatReqs = rand(0, Math.floor(agentReqs * 0.2));
   const composerReqs = rand(0, Math.floor(agentReqs * 0.1));
-  const model = seededRandom() < 0.8 ? user.primaryModel : weightedPick(MODELS, MODEL_WEIGHTS);
+  let model = user.primaryModel;
+  if (seededRandom() > 0.85) {
+    const primaryCost = MODEL_COST_PER_REQ[user.primaryModel] ?? 0.5;
+    const candidates = MODELS.filter((m) => (MODEL_COST_PER_REQ[m] ?? 0.5) <= primaryCost * 3);
+    const candidateWeights = candidates.map((m) => MODEL_WEIGHTS[MODELS.indexOf(m)] ?? 1);
+    model = weightedPick(candidates, candidateWeights);
+  }
   const costPerReq = MODEL_COST_PER_REQ[model] ?? 0.5;
 
-  const events = generateEvents(
-    user,
-    date,
-    Math.min(agentReqs, rand(5, 25)),
-    model,
-    costPerReq,
-    false,
-  );
-  const spendCents = Math.round(events.reduce((s, e) => s + e.totalCents, 0));
+  const eventCount = Math.min(agentReqs, rand(5, 25));
+  const events = generateEvents(user, date, eventCount, model, costPerReq, false);
+  const jitter = 0.85 + seededRandom() * 0.3;
+  const spendCents = Math.round(costPerReq * 100 * agentReqs * jitter);
 
   const linesAdded = agentReqs * rand(3, 15);
   const linesDeleted = Math.floor(linesAdded * (0.2 + seededRandom() * 0.3));

@@ -29,14 +29,15 @@
 ### Members Table
 
 - Sortable by: spend, activity, requests, lines, $/req, context, name
-- Filterable by badge type
+- Filterable by badge type via `Badges ▾` dropdown with collapsible sections and per-badge user counts
+- Active badge filter shown as chip with ✕ dismiss next to table header
 - Columns: rank, name, email, spend, requests, lines, $/req, model, profile badges, ranks
 
-### Badges (per user, max 2)
+### Badges (per user, all shown)
 
 | Category | Badges                                                                                                                                                                |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Usage    | Power User, Deep Thinker, Low Usage                                                                                                                                   |
+| Usage    | Power User, Deep Thinker, Balanced, Low Usage                                                                                                                         |
 | Spend    | Cost Efficient, Premium Model, Over Budget                                                                                                                            |
 | Context  | Long Sessions, Short Sessions                                                                                                                                         |
 | Adoption | AI-Native (80%+), High Adoption (55%+), Moderate (30%+), Low Adoption (10%+), Manual Coder (<10%) — based on composite score (accept rate + engagement + consistency) |
