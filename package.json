@@ -2,7 +2,7 @@
   "name": "cursor-usage-tracker",
   "version": "0.0.0-development",
   "description": "Open-source Cursor IDE usage monitoring, anomaly detection, and alerting for enterprise teams",
-  "homepage": "https://cursor-usage-tracker.sticklight.app",
+  "homepage": "https://github.com/ofershap/cursor-usage-tracker#readme",
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -69,7 +69,6 @@
   "bugs": {
     "url": "https://github.com/ofershap/cursor-usage-tracker/issues"
   },
-  "homepage": "https://github.com/ofershap/cursor-usage-tracker#readme",
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.18",
     "better-sqlite3": "^12.6.2",
@@ -81,6 +80,7 @@
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.36.0",
     "@eslint/js": "^10.0.1",
     "@next/eslint-plugin-next": "^16.1.6",
     "@semantic-release/changelog": "^6.0.3",

@@ -56,6 +56,8 @@ You're about to find out.
 
 <sub>Demo animation created with <a href="https://github.com/ofershap/remotion-readme-kit">remotion-readme-kit</a></sub>
 
+<p align="center"><a href="https://www.youtube.com/watch?v=DqPjFWGI57A">▶ Watch the full demo (90 seconds)</a></p>
+
 It connects to Cursor's Enterprise APIs, collects usage data, and automatically detects anomalies across three layers. When something looks off, you get a Slack message or email within the hour, not next month.
 
 ```

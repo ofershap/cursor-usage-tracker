@@ -1,0 +1,102 @@
+{
+  "title": "The $6,000 Save — Cursor Usage Tracker Demo",
+  "description": "90-second product demo showing how automated anomaly detection catches costly usage patterns and saves money via Slack alerts.",
+  "targetLength": "85-95 seconds",
+  "voice": {
+    "candidates": [
+      {
+        "name": "Adam",
+        "voiceId": "pNInz6obpgDQGcFmaJgB",
+        "style": "Deep, neutral American, most popular narration voice",
+        "note": "Industry standard for tutorials. May be recognizable."
+      },
+      {
+        "name": "Brian",
+        "voiceId": "nPczCjzI2devNBz1zQrb",
+        "style": "Warm conversational American male",
+        "note": "Less overused than Adam, feels more natural."
+      },
+      {
+        "name": "George",
+        "voiceId": "JBFqnCBsd6RMkjVDRZzb",
+        "style": "Warm British male, articulate",
+        "note": "Stands out, gives authority without sounding corporate."
+      }
+    ],
+    "selected": "Adam",
+    "model": "eleven_multilingual_v2",
+    "outputFormat": "mp3_44100_128",
+    "settings": {
+      "stability": 0.35,
+      "similarityBoost": 0.8,
+      "style": 0.6,
+      "useSpeakerBoost": true
+    }
+  },
+  "scenes": [
+    {
+      "id": "hook",
+      "label": "Hook — The question",
+      "narration": "Your team is spending twenty-five thousand dollars a month on Cursor. Do you know where it's going?",
+      "screen": "Dashboard home page. Stat cards visible: 65 members, ~$25k team spend. Daily spend chart in background.",
+      "duration_estimate_sec": 7,
+      "tips": "Start with dashboard already loaded. Let the numbers speak — don't move the mouse yet."
+    },
+    {
+      "id": "problem",
+      "label": "Problem — The invisible cost spike",
+      "narration": "Meet Elena. She didn't start new conversations for a week. Her context window grew to fifteen million tokens, and her cost per request went from seventy-two cents to over six dollars.",
+      "screen": "Click on Elena Berg in the members table. Her user page loads showing the spend chart with the $/req line spiking on Feb 10-11. Hover over the spike to show the tooltip with $/req value.",
+      "duration_estimate_sec": 14,
+      "tips": "Click Elena right as 'Meet Elena' is spoken. The purple $/req line spiking is the visual proof — hover over it to show the tooltip."
+    },
+    {
+      "id": "detection",
+      "label": "Solution — Automatic detection",
+      "narration": "Cursor Usage Tracker caught it automatically — running anomaly detection across your entire team. Static thresholds, z-scores, and trend analysis.",
+      "screen": "Navigate to the Anomalies page. Elena's critical alert is visible: 'cycle spend $3,513 is 40.1x the team median'. Show the incident timeline with MTTD/MTTI/MTTR cards.",
+      "duration_estimate_sec": 12,
+      "tips": "Hover over Elena's anomaly row briefly so the detail is readable. The MTTD cards at the top sell the operational maturity."
+    },
+    {
+      "id": "slack_alert",
+      "label": "USP — Slack notification",
+      "narration": "And the moment it happened, you got a Slack alert.",
+      "screen": "Show the Slack message in a channel. The alert block shows: user name, severity, dollar amount, model used. Linger on this for 3-4 seconds.",
+      "duration_estimate_sec": 5,
+      "tips": "THIS IS THE HERO SHOT. Zoom in slightly if editing. The Slack message is what makes this different from just a dashboard."
+    },
+    {
+      "id": "recovery",
+      "label": "Proof — The before/after",
+      "narration": "One message. You tell the team to start fresh conversations. Costs drop eight-x overnight. Six thousand dollars saved.",
+      "screen": "Back to Elena's user page. Point out or highlight the spend chart showing the drop after Feb 14. The before/after is dramatic.",
+      "duration_estimate_sec": 10,
+      "tips": "The visual contrast in the spend chart is the wow moment — the drop after Feb 14 is dramatic."
+    },
+    {
+      "id": "montage",
+      "label": "Montage — Other catches",
+      "narration": "It also catches expensive model switches, plan exhaustion on day one, and unused seats burning three hundred sixty dollars a month.",
+      "screen": "Quick cuts: (1) Marcus's anomaly showing $14.55/req model switch, 2 sec. (2) Nina's plan exhaustion alert, 2 sec. (3) Members table sorted by activity showing zeros at bottom, 2 sec.",
+      "duration_estimate_sec": 11,
+      "tips": "These are fast cuts — 2 seconds each. Pre-navigate to each view in separate browser tabs so you can switch quickly."
+    },
+    {
+      "id": "cta",
+      "label": "CTA — Open source, deploy now",
+      "narration": "Open source. Self-hosted. Deploy with Docker in five minutes. Start saving before the next billing cycle.",
+      "screen": "GitHub repo page showing the README. Docker compose section visible. Star count visible.",
+      "duration_estimate_sec": 8,
+      "tips": "End on the GitHub page. If you want, click the Star button as a subtle call-to-action."
+    }
+  ],
+  "totalEstimatedDuration": 67,
+  "notes": [
+    "Run mock data first: npm run generate:mock && DATABASE_PATH=data/mock.db npm run dev -- -p 3456",
+    "Pre-open all pages in browser tabs before recording: home, Elena's page, anomalies, Slack, Marcus anomaly, Nina anomaly, members sorted, GitHub repo",
+    "Record each scene as a separate screen recording clip",
+    "The Slack screenshot can be a real screenshot or a mock — either works",
+    "For the montage scene, consider recording 3 separate clips and cutting between them"
+  ]
+}
