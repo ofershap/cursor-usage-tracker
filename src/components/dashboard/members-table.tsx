@@ -439,7 +439,7 @@ export function MembersTable({
                       ? rankBadge(row.activity_rank)
                       : rankBadge(row.spend_rank)}
                   </td>
-                  <td className="px-4 py-2.5 font-medium">
+                  <td className="px-4 py-2.5 font-medium whitespace-nowrap">
                     <Link
                       href={`/users/${encodeURIComponent(row.email)}`}
                       className="hover:text-blue-300 transition-colors"
@@ -447,7 +447,9 @@ export function MembersTable({
                       {row.name}
                     </Link>
                   </td>
-                  <td className="px-4 py-2.5 text-zinc-400 text-xs">{row.email}</td>
+                  <td className="px-4 py-2.5 text-zinc-400 text-xs whitespace-nowrap">
+                    {row.email}
+                  </td>
                   <td className="text-right px-4 py-2.5 font-mono text-zinc-400">
                     ${(row.spend_cents / 100).toFixed(0)}
                   </td>
@@ -477,7 +479,7 @@ export function MembersTable({
                     {shortModel(row.most_used_model)}
                   </td>
                   <td className="text-center px-4 py-2.5">
-                    <div className="flex items-center justify-center gap-1 flex-wrap">
+                    <div className="inline-flex flex-col items-start gap-0.5">
                       {(() => {
                         const allBadges: {
                           key: string;
@@ -513,26 +515,35 @@ export function MembersTable({
                         const extra = allBadges.length - shown.length;
                         return (
                           <>
-                            {shown.map((b) => (
-                              <span
-                                key={b.key}
-                                className={`${b.cfg.color} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap`}
-                                title={b.cfg.tooltip}
-                              >
-                                {b.cfg.label}
-                              </span>
-                            ))}
-                            {extra > 0 && (
-                              <span
-                                className="text-[9px] text-zinc-600"
-                                title={allBadges
-                                  .slice(2)
-                                  .map((b) => b.cfg.label)
-                                  .join(", ")}
-                              >
-                                +{extra}
-                              </span>
-                            )}
+                            {shown.map((b, i) => {
+                              const isLast = i === shown.length - 1;
+                              const badge = (
+                                <span
+                                  key={b.key}
+                                  className={`${b.cfg.color} px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap`}
+                                  title={b.cfg.tooltip}
+                                >
+                                  {b.cfg.label}
+                                </span>
+                              );
+                              if (isLast && extra > 0) {
+                                return (
+                                  <span key={b.key} className="flex items-center gap-1">
+                                    {badge}
+                                    <span
+                                      className="text-[9px] text-zinc-600"
+                                      title={allBadges
+                                        .slice(2)
+                                        .map((bb) => bb.cfg.label)
+                                        .join(", ")}
+                                    >
+                                      +{extra}
+                                    </span>
+                                  </span>
+                                );
+                              }
+                              return badge;
+                            })}
                           </>
                         );
                       })()}

@@ -295,13 +295,24 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
     <div className="space-y-3">
       {/* ── Toolbar: Search + Group Filter + Time Range ── */}
       <div className="flex items-center gap-2 flex-wrap">
-        <input
-          type="text"
-          placeholder="Search name or email..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50 w-56"
-        />
+        <div className="relative w-56">
+          <input
+            type="text"
+            placeholder="Search name or email..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 pr-7 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50 w-full"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-xs cursor-pointer"
+              aria-label="Clear search"
+            >
+              ✕
+            </button>
+          )}
+        </div>
         {groups.length > 1 && (
           <select
             value={selectedGroup}
@@ -391,7 +402,11 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
         <KpiSep />
         <Kpi
           label={`Active (${timeLabel})`}
-          value={isSearching ? filteredUsers.length.toString() : stats.activeMembers.toString()}
+          value={
+            isSearching
+              ? filteredUsers.length.toString()
+              : `${stats.activeMembers} / ${stats.totalMembers}`
+          }
           sub={
             isSearching
               ? `${filteredUsers.length} of ${stats.totalMembers} members`

@@ -792,15 +792,16 @@ export function updateIncidentStatus(
   db.prepare(`UPDATE incidents SET ${sets.join(", ")} WHERE id = ?`).run(...params);
 }
 
-const INCIDENT_SELECT = `SELECT id, anomaly_id as anomalyId, user_email as userEmail, status,
-  detected_at as detectedAt, alerted_at as alertedAt, acknowledged_at as acknowledgedAt,
-  resolved_at as resolvedAt, mttd_minutes as mttdMinutes, mtti_minutes as mttiMinutes, mttr_minutes as mttrMinutes
-  FROM incidents`;
+const INCIDENT_SELECT = `SELECT i.id, i.anomaly_id as anomalyId, i.user_email as userEmail, i.status,
+  i.detected_at as detectedAt, i.alerted_at as alertedAt, i.acknowledged_at as acknowledgedAt,
+  i.resolved_at as resolvedAt, i.mttd_minutes as mttdMinutes, i.mtti_minutes as mttiMinutes, i.mttr_minutes as mttrMinutes,
+  a.severity, a.message
+  FROM incidents i LEFT JOIN anomalies a ON i.anomaly_id = a.id`;
 
 export function getOpenIncidents(): Incident[] {
   const db = getDb();
   return db
-    .prepare(`${INCIDENT_SELECT} WHERE status NOT IN ('resolved') ORDER BY detected_at DESC`)
+    .prepare(`${INCIDENT_SELECT} WHERE i.status NOT IN ('resolved') ORDER BY i.detected_at DESC`)
     .all() as Incident[];
 }
 
@@ -1027,7 +1028,7 @@ export function getFullDashboard(days: number = 7): FullDashboard {
           LEFT JOIN user_spend us ON m.email = us.email
           LEFT JOIN user_cache uc ON m.email = uc.email
           LEFT JOIN activity a ON m.email = a.email
-          WHERE m.is_removed = 0 AND (COALESCE(us.spend_cents, 0) > 0 OR COALESCE(a.agent_requests, 0) > 0)
+          WHERE m.is_removed = 0
           ORDER BY COALESCE(us.spend_cents, 0) DESC`
         : `WITH deduped_spend AS (
             SELECT date, email, MAX(spend_cents) as spend_cents
@@ -1071,7 +1072,7 @@ export function getFullDashboard(days: number = 7): FullDashboard {
           FROM members m
           LEFT JOIN user_spend us ON m.email = us.email
           LEFT JOIN activity a ON m.email = a.email
-          WHERE m.is_removed = 0 AND (COALESCE(us.spend_cents, 0) > 0 OR COALESCE(a.agent_requests, 0) > 0)
+          WHERE m.is_removed = 0
           ORDER BY COALESCE(us.spend_cents, 0) DESC`,
     )
     .all(
@@ -1642,7 +1643,9 @@ export function getAnomalyTimeline(days: number = 30) {
     .all(`-${days} days`) as Anomaly[];
 
   const incidents = db
-    .prepare(`${INCIDENT_SELECT} WHERE detected_at >= datetime('now', ?) ORDER BY detected_at DESC`)
+    .prepare(
+      `${INCIDENT_SELECT} WHERE i.detected_at >= datetime('now', ?) ORDER BY i.detected_at DESC`,
+    )
     .all(`-${days} days`) as Incident[];
 
   const avgMttd = db

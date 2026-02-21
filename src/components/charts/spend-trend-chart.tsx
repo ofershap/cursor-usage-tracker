@@ -1,8 +1,9 @@
 "use client";
 
 import {
-  AreaChart,
+  ComposedChart,
   Area,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -54,16 +55,21 @@ export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendCha
     const prevSpend = i > 0 ? (data[i - 1]?.spend_cents ?? 0) / 100 : spend;
     const change = spend - prevSpend;
     const changePct = prevSpend > 0 ? (change / prevSpend) * 100 : 0;
+    const costPerReq =
+      d.agent_requests && d.agent_requests > 0 ? spend / d.agent_requests : undefined;
     return {
       date: d.date,
       spend,
       change,
       changePct,
+      costPerReq,
       requests: d.agent_requests,
       linesAdded: d.lines_added,
       linesDeleted: d.lines_deleted,
     };
   });
+
+  const hasCostPerReq = chartData.some((d) => d.costPerReq != null);
 
   const provisionalDays = 2;
   const provisionalStart =
@@ -86,6 +92,12 @@ export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendCha
       <div className="flex items-baseline gap-2 mb-2">
         <h3 className="text-xs font-medium text-zinc-400">Daily Spend</h3>
         <span className="text-[10px] text-zinc-600">{data.length} days of data</span>
+        {hasCostPerReq && (
+          <span className="text-[10px] text-purple-400/70 flex items-center gap-1">
+            <span className="inline-block w-3 border-t border-dashed border-purple-400" />
+            $/req
+          </span>
+        )}
         {provisionalStart && (
           <span className="text-[10px] text-amber-500/70 ml-auto">
             Last {provisionalDays}d may be partial (API lag)
@@ -93,7 +105,7 @@ export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendCha
         )}
       </div>
       <ResponsiveContainer width="100%" height={200}>
-        <AreaChart data={chartData} margin={{ left: 0, right: 10 }}>
+        <ComposedChart data={chartData} margin={{ left: 0, right: hasCostPerReq ? 5 : 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
           <XAxis
             dataKey="date"
@@ -102,7 +114,17 @@ export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendCha
             tickFormatter={formatDateTick}
             interval={chartData.length <= 14 ? 0 : Math.floor(chartData.length / 10)}
           />
-          <YAxis stroke="#71717a" fontSize={11} tickFormatter={fmtDollars} />
+          <YAxis yAxisId="spend" stroke="#71717a" fontSize={11} tickFormatter={fmtDollars} />
+          {hasCostPerReq && (
+            <YAxis
+              yAxisId="cpr"
+              orientation="right"
+              stroke="#a78bfa"
+              fontSize={10}
+              tickFormatter={(v: number) => `$${v < 1 ? v.toFixed(1) : Math.round(v)}`}
+              width={40}
+            />
+          )}
           <Tooltip
             contentStyle={TOOLTIP_STYLE}
             labelStyle={{ color: "#a1a1aa" }}
@@ -136,8 +158,16 @@ export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendCha
                       {(((pt.spend - avg) / avg) * 100).toFixed(0)}%)
                     </span>
                   </div>
-                  {(pt.requests != null || pt.linesAdded != null) && (
+                  {(pt.requests != null || pt.linesAdded != null || pt.costPerReq != null) && (
                     <div className="mt-1.5 pt-1.5 border-t border-zinc-700/50 flex flex-col gap-0.5 text-[11px] text-zinc-400">
+                      {pt.costPerReq != null && (
+                        <div>
+                          <span className="text-zinc-500">$/Req:</span>{" "}
+                          <span className="font-mono text-purple-400">
+                            ${pt.costPerReq.toFixed(2)}
+                          </span>
+                        </div>
+                      )}
                       {pt.requests != null && (
                         <div>
                           <span className="text-zinc-500">Requests:</span>{" "}
@@ -171,6 +201,7 @@ export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendCha
           />
           {dimEndDate && cutoffDate && (
             <ReferenceArea
+              yAxisId="spend"
               x1={chartData[0]?.date}
               x2={dimEndDate}
               fill="#18181b"
@@ -180,6 +211,7 @@ export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendCha
           )}
           {provisionalStart && (
             <ReferenceArea
+              yAxisId="spend"
               x1={provisionalStart}
               x2={chartData[chartData.length - 1]?.date}
               fill="#f59e0b"
@@ -190,6 +222,7 @@ export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendCha
             />
           )}
           <ReferenceLine
+            yAxisId="spend"
             y={avg}
             stroke="#f59e0b"
             strokeDasharray="4 4"
@@ -209,6 +242,7 @@ export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendCha
             </linearGradient>
           </defs>
           <Area
+            yAxisId="spend"
             type="monotone"
             dataKey="spend"
             stroke="#3b82f6"
@@ -216,7 +250,20 @@ export function SpendTrendChart({ data, selectedDays, avgPerDay }: SpendTrendCha
             fill="url(#spendGrad)"
             activeDot={{ r: 5, fill: "#3b82f6", stroke: "#1e3a5f" }}
           />
-        </AreaChart>
+          {hasCostPerReq && (
+            <Line
+              yAxisId="cpr"
+              type="monotone"
+              dataKey="costPerReq"
+              stroke="#a78bfa"
+              strokeWidth={1.5}
+              strokeDasharray="4 2"
+              dot={false}
+              activeDot={{ r: 4, fill: "#a78bfa", stroke: "#4c1d95" }}
+              connectNulls
+            />
+          )}
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );

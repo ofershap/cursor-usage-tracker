@@ -202,11 +202,11 @@ const MODELS = [
   "claude-4.6-opus-max-thinking",
 ];
 
-const MODEL_WEIGHTS = [20, 15, 4, 12, 10, 10, 5, 5, 5, 5, 3, 2, 0, 4];
+const MODEL_WEIGHTS = [20, 15, 1, 12, 10, 10, 5, 5, 5, 5, 3, 2, 0, 1];
 
 const MODEL_COST_PER_REQ: Record<string, number> = {
   "claude-4.5-sonnet": 0.06,
-  "claude-4.6-opus-high": 0.38,
+  "claude-4.6-opus-high": 0.72,
   "claude-4.6-opus-max": 4.5,
   "claude-4.5-haiku": 0.015,
   "claude-4.6-opus-high-thinking": 0.8,
@@ -825,9 +825,9 @@ function run() {
       "trend",
       "warning",
       "spend",
-      78000,
+      250000,
       20000,
-      "Alex Kim: cycle spend $780 exceeds $200 threshold — consistently high usage with thinking models",
+      "Alex Kim: cycle spend $2,500 exceeds $200 threshold — consistently high usage with thinking models",
       "2026-02-15 09:00:00",
       null,
       "2026-02-15 09:00:05",
@@ -1249,8 +1249,8 @@ function generateExpensiveModelDay(user: StoryMember, date: string, isWeekend: b
     const agentReqs = 84;
     const model = "claude-4.6-opus-high-thinking-fast";
     const costPerReq = MODEL_COST_PER_REQ[model] ?? 14.55;
-    const events = generateEvents(user, date, agentReqs, model, costPerReq, true);
-    const spendCents = Math.round(events.reduce((s, e) => s + e.totalCents, 0));
+    const spendCents = Math.round(costPerReq * 100 * agentReqs);
+    const events = generateEvents(user, date, agentReqs, model, costPerReq, true, spendCents);
 
     return {
       agentReqs,
@@ -1295,9 +1295,9 @@ function generateLongConversationDay(user: StoryMember, date: string, isWeekend:
 
     const model = user.primaryModel;
     const baseCost = MODEL_COST_PER_REQ[model] ?? 1.0;
-    const inflatedCost = baseCost * (5 + seededRandom() * 4);
-    const events = generateEvents(user, date, agentReqs, model, inflatedCost, true);
-    const spendCents = Math.round(events.reduce((s, e) => s + e.totalCents, 0));
+    const inflatedCost = baseCost * (8 + seededRandom() * 4);
+    const spendCents = Math.round(inflatedCost * 100 * agentReqs);
+    const events = generateEvents(user, date, agentReqs, model, inflatedCost, true, spendCents);
 
     return {
       agentReqs,
@@ -1339,8 +1339,8 @@ function generateDay1ExhaustDay(user: StoryMember, date: string, isWeekend: bool
     const agentReqs = rand(180, 220);
     const model = user.primaryModel;
     const costPerReq = MODEL_COST_PER_REQ[model] ?? 1.26;
-    const events = generateEvents(user, date, agentReqs, model, costPerReq, false);
-    const spendCents = Math.round(events.reduce((s, e) => s + e.totalCents, 0));
+    const spendCents = Math.round(costPerReq * 100 * agentReqs);
+    const events = generateEvents(user, date, agentReqs, model, costPerReq, false, spendCents);
 
     return {
       agentReqs,
@@ -1362,7 +1362,11 @@ function generateDay1ExhaustDay(user: StoryMember, date: string, isWeekend: bool
     };
   }
 
-  return generateNormalDay({ ...user, activityLevel: "high" }, date, isWeekend);
+  return generateNormalDay(
+    { ...user, activityLevel: "high", primaryModel: "claude-4.6-opus-high" },
+    date,
+    isWeekend,
+  );
 }
 
 // Story G: Derek — old version, low usage
@@ -1380,8 +1384,8 @@ function generateTopSpenderDay(user: StoryMember, date: string, isWeekend: boole
   const agentReqs = rand(100, 180);
   const model = user.primaryModel;
   const costPerReq = MODEL_COST_PER_REQ[model] ?? 2.8;
-  const events = generateEvents(user, date, agentReqs, model, costPerReq, false);
-  const spendCents = Math.round(events.reduce((s, e) => s + e.totalCents, 0));
+  const spendCents = Math.round(costPerReq * 100 * agentReqs);
+  const events = generateEvents(user, date, agentReqs, model, costPerReq, false, spendCents);
 
   return {
     agentReqs,
@@ -1426,10 +1430,9 @@ function generateNormalDay(user: StoryMember, date: string, isWeekend: boolean):
   }
   const costPerReq = MODEL_COST_PER_REQ[model] ?? 0.5;
 
-  const eventCount = Math.min(agentReqs, rand(5, 25));
-  const events = generateEvents(user, date, eventCount, model, costPerReq, false);
   const jitter = 0.85 + seededRandom() * 0.3;
   const spendCents = Math.round(costPerReq * 100 * agentReqs * jitter);
+  const events = generateEvents(user, date, agentReqs, model, costPerReq, false, spendCents);
 
   const linesAdded = agentReqs * rand(3, 15);
   const linesDeleted = Math.floor(linesAdded * (0.2 + seededRandom() * 0.3));
@@ -1471,8 +1474,20 @@ function generateEvents(
   model: string,
   costPerReq: number,
   isHighCache: boolean,
+  targetTotalCents?: number,
 ): DayEvent[] {
   const events: DayEvent[] = [];
+  const weights: number[] = [];
+  let weightSum = 0;
+
+  for (let i = 0; i < count; i++) {
+    const w = 0.6 + seededRandom() * 0.8;
+    weights.push(w);
+    weightSum += w;
+  }
+
+  const total = targetTotalCents ?? Math.round(costPerReq * 100 * count);
+
   for (let i = 0; i < count; i++) {
     const hour = rand(7, 22);
     const minute = rand(0, 59);
@@ -1486,11 +1501,10 @@ function generateEvents(
     const inputTokens = rand(500, 50000);
     const outputTokens = model.includes("thinking") ? rand(5000, 80000) : rand(100, 20000);
 
-    const cacheRead = isHighCache ? rand(2000000, 15000000) : rand(0, inputTokens);
+    const cacheRead = isHighCache ? rand(10000000, 15000000) : rand(0, inputTokens);
     const cacheWrite = rand(0, Math.floor(inputTokens * 0.3));
 
-    const jitter = 0.6 + seededRandom() * 0.8;
-    const totalCents = +(costPerReq * 100 * jitter).toFixed(2);
+    const totalCents = +((total * (weights[i] ?? 1)) / weightSum).toFixed(2);
 
     const isMax = model.includes("-max") ? 1 : 0;
     const kind = pick(EVENT_KINDS);
@@ -1513,27 +1527,27 @@ function generateEvents(
 function computeCycleSpend(user: StoryMember): number {
   switch (user.storyRole) {
     case "expensive_model":
-      return 185000;
+      return 305000;
     case "long_conversation":
       return user.email === "elena.berg@acme-corp.com"
         ? 351300
         : user.email === "raj.patel@acme-corp.com"
-          ? 120000
-          : 65000;
+          ? 240000
+          : 105000;
     case "day1_exhaust":
-      return 95000;
+      return 270000;
     case "top_spender":
-      return 78000;
+      return 250000;
     case "inactive":
       return 0;
     case "old_version":
       return rand(500, 2000);
     default:
       return user.activityLevel === "high"
-        ? rand(15000, 60000)
+        ? rand(15000, 45000)
         : user.activityLevel === "medium"
-          ? rand(3000, 15000)
-          : rand(200, 4000);
+          ? rand(4000, 15000)
+          : rand(300, 3000);
   }
 }
 

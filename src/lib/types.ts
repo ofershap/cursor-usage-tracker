@@ -374,6 +374,8 @@ export interface Incident {
   mttdMinutes: number | null;
   mttiMinutes: number | null;
   mttrMinutes: number | null;
+  severity?: string;
+  message?: string;
 }
 
 export interface DetectionConfig {

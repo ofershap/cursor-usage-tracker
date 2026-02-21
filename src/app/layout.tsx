@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { NavLinks } from "@/components/nav-links";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,17 +9,6 @@ export const metadata: Metadata = {
   description: "Monitor Cursor IDE usage, detect anomalies, and alert on spending spikes",
   icons: { icon: "/favicon.png" },
 };
-
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="px-3 py-2 text-sm text-zinc-400 hover:text-white transition-colors rounded-md hover:bg-zinc-800"
-    >
-      {children}
-    </Link>
-  );
-}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -32,10 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <Image src="/logo.png" alt="" width={22} height={22} aria-hidden />
                   <span className="text-sm font-semibold text-white">Cursor Tracker</span>
                 </Link>
-                <NavLink href="/">Overview</NavLink>
-                <NavLink href="/insights">Insights</NavLink>
-                <NavLink href="/anomalies">Anomalies</NavLink>
-                <NavLink href="/settings">Settings</NavLink>
+                <NavLinks />
               </div>
               <div className="text-xs text-zinc-500">cursor-usage-tracker</div>
             </div>
