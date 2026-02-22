@@ -86,7 +86,7 @@ export function detectThresholdAnomalies(config: DetectionConfig): Anomaly[] {
   };
   const cycleStart = cycleStartRow?.cs;
 
-  if (cycleStart) {
+  if (cycleStart && config.enableInfoAnomalies) {
     const planExhausted = db
       .prepare(
         `SELECT du.email, m.name, MIN(du.date) as exhausted_on,

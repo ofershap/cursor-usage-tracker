@@ -182,6 +182,15 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
           </div>
         </Section>
 
+        <Section title="Alerting Behavior" description="Control which anomaly types are generated">
+          <Toggle
+            label="Info-level anomalies"
+            description="Plan exhaustion notifications (can be noisy for large teams)"
+            checked={config.enableInfoAnomalies}
+            onChange={(v) => setConfig({ ...config, enableInfoAnomalies: v })}
+          />
+        </Section>
+
         <Section
           title="Team Budget Alert"
           description="Get notified when total team spend reaches this amount. Set to 0 to disable."
@@ -1217,6 +1226,42 @@ function Section({
       <h3 className="text-xs font-medium text-zinc-400">{title}</h3>
       <p className="text-[10px] text-zinc-600 mb-3">{description}</p>
       <div className="space-y-2.5">{children}</div>
+    </div>
+  );
+}
+
+function Toggle({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <div>
+        <span className="text-xs text-zinc-300">{label}</span>
+        {description && <p className="text-[10px] text-zinc-600">{description}</p>}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+          checked ? "bg-blue-600" : "bg-zinc-700"
+        }`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+            checked ? "translate-x-4" : "translate-x-0"
+          }`}
+        />
+      </button>
     </div>
   );
 }

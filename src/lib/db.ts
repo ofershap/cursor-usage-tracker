@@ -818,6 +818,7 @@ export function getConfig(): DetectionConfig {
     zscore: { ...DEFAULT_CONFIG.zscore, ...stored.zscore },
     trends: { ...DEFAULT_CONFIG.trends, ...stored.trends },
     cronIntervalMinutes: stored.cronIntervalMinutes ?? DEFAULT_CONFIG.cronIntervalMinutes,
+    enableInfoAnomalies: stored.enableInfoAnomalies ?? DEFAULT_CONFIG.enableInfoAnomalies,
   };
 }
 

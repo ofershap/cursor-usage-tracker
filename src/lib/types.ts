@@ -393,6 +393,7 @@ export interface DetectionConfig {
     cycleOutlierMultiplier: number;
   };
   cronIntervalMinutes: number;
+  enableInfoAnomalies: boolean;
 }
 
 export const DEFAULT_CONFIG: DetectionConfig = {
@@ -410,4 +411,5 @@ export const DEFAULT_CONFIG: DetectionConfig = {
     cycleOutlierMultiplier: 10,
   },
   cronIntervalMinutes: 60,
+  enableInfoAnomalies: false,
 };
