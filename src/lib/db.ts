@@ -1611,6 +1611,37 @@ export function getUserStats(email: string, days: number = 7) {
     )
     .get(email) as { id: string; name: string } | undefined;
 
+  const cycleRow = db.prepare("SELECT MAX(cycle_start) as cs FROM spending").get() as {
+    cs: string | null;
+  };
+  const cycleStart = cycleRow?.cs;
+  let planExhaustion: { daysToExhaust: number; usageBasedReqs: number; cycleDay: number } | null =
+    null;
+  if (cycleStart) {
+    const exhaustRow = db
+      .prepare(
+        `SELECT CAST(julianday(MIN(du.date)) - julianday(?) + 1 AS INT) as days_to_exhaust,
+            SUM(du.usage_based_reqs) as usage_based_reqs
+         FROM daily_usage du
+         WHERE du.email = ? AND du.date >= ? AND du.usage_based_reqs > 0`,
+      )
+      .get(cycleStart, email, cycleStart) as
+      | {
+          days_to_exhaust: number | null;
+          usage_based_reqs: number | null;
+        }
+      | undefined;
+    if (exhaustRow?.days_to_exhaust != null) {
+      const cycleDayNum =
+        Math.floor((Date.now() - new Date(cycleStart).getTime()) / (24 * 60 * 60 * 1000)) + 1;
+      planExhaustion = {
+        daysToExhaust: exhaustRow.days_to_exhaust,
+        usageBasedReqs: exhaustRow.usage_based_reqs ?? 0,
+        cycleDay: cycleDayNum,
+      };
+    }
+  }
+
   return {
     member,
     spending,
@@ -1632,6 +1663,7 @@ export function getUserStats(email: string, days: number = 7) {
     contextMetrics,
     badges,
     aiAdoption,
+    planExhaustion,
   };
 }
 

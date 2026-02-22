@@ -70,8 +70,13 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   const [preBadgeSortCol, setPreBadgeSortCol] = useState<SortColumn | null>(null);
   const [groups, setGroups] = useState<BillingGroupWithMembers[]>([]);
   const [selectedGroup, setSelectedGroup] = useState("all");
+  const [exhaustionFilter, setExhaustionFilter] = useState<{
+    label: string;
+    emails: Set<string>;
+  } | null>(null);
 
   const groupParam = searchParams.get("group");
+  const exhaustionParam = searchParams.get("exhaustion");
   useEffect(() => {
     fetch("/api/groups")
       .then((r) => r.json())
@@ -82,6 +87,27 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
         }
       })
       .catch(() => {});
+    if (exhaustionParam) {
+      const [minStr, maxStr] = exhaustionParam.split("-");
+      const min = parseInt(minStr ?? "0", 10);
+      const max = parseInt(maxStr ?? "999", 10);
+      fetch("/api/analytics")
+        .then((r) => r.json())
+        .then(
+          (analytics: {
+            planExhaustion?: { users: Array<{ email: string; days_to_exhaust: number }> };
+          }) => {
+            const matching = (analytics.planExhaustion?.users ?? []).filter(
+              (u) => u.days_to_exhaust >= min && u.days_to_exhaust <= max,
+            );
+            setExhaustionFilter({
+              label: `Plan exhausted day ${min}–${max}`,
+              emails: new Set(matching.map((u) => u.email)),
+            });
+          },
+        )
+        .catch(() => {});
+    }
     const saved = localStorage.getItem("dashboard-days");
     if (saved) {
       const parsed = parseInt(saved, 10);
@@ -170,6 +196,9 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
     if (groupEmailSet) {
       users = users.filter((u) => groupEmailSet.has(u.email));
     }
+    if (exhaustionFilter) {
+      users = users.filter((u) => exhaustionFilter.emails.has(u.email));
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       users = users.filter(
@@ -210,7 +239,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
       }
     });
     return sorted;
-  }, [stats.rankedUsers, search, sortCol, sortAsc, groupEmailSet, badgeFilter]);
+  }, [stats.rankedUsers, search, sortCol, sortAsc, groupEmailSet, badgeFilter, exhaustionFilter]);
 
   const searchedUser = useMemo(() => {
     if (!search.trim()) return null;
@@ -236,7 +265,11 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   }
 
   const timeLabel = formatTimeLabel(days);
-  const isSearching = search.trim().length > 0 || selectedGroup !== "all" || badgeFilter !== null;
+  const isSearching =
+    search.trim().length > 0 ||
+    selectedGroup !== "all" ||
+    badgeFilter !== null ||
+    exhaustionFilter !== null;
   const totalLines = stats.dailyTeamActivity.reduce((s, d) => s + d.total_lines_added, 0);
   const effectiveDays = Math.min(days, stats.cycleDays);
   const cycleStartDate = new Date(stats.cycleStart);
@@ -361,6 +394,20 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
           ))}
         </div>
         {loading && <span className="text-[11px] text-zinc-500 animate-pulse">Updating...</span>}
+        {exhaustionFilter && (
+          <span className="inline-flex items-center gap-1.5 bg-orange-600/20 text-orange-300 rounded-md px-2 py-1 text-[11px] font-medium">
+            {exhaustionFilter.label} ({exhaustionFilter.emails.size})
+            <button
+              onClick={() => {
+                setExhaustionFilter(null);
+                window.history.replaceState({}, "", "/");
+              }}
+              className="hover:text-orange-100 cursor-pointer"
+            >
+              ✕
+            </button>
+          </span>
+        )}
         <div className="ml-auto text-[11px] text-zinc-600">
           {isSearching ? `${filteredUsers.length} / ` : ""}
           {stats.totalMembers} members

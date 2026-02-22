@@ -665,14 +665,17 @@ function PlanExhaustionSection({ data }: { data: PlanExhaustionData }) {
           label="Exceeded"
           value={`${summary.users_exhausted}/${summary.total_active}`}
           sub={`${summary.pct_exhausted}% of active`}
+          href="/?exhaustion=1-999"
         />
         <MiniKpi label="Avg Days" value={summary.avg_days.toFixed(1)} sub="to exceed" />
         <MiniKpi label="Median" value={summary.median_days.toString()} sub="days" />
         <div className="w-px bg-zinc-800 shrink-0 my-1" />
         {buckets.map((b) => (
-          <div
+          <a
             key={b.label}
-            className="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 min-w-0 flex-1"
+            href={`/?exhaustion=${b.min}-${b.max}`}
+            className="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 min-w-0 flex-1 hover:border-zinc-600 transition-colors cursor-pointer"
+            title={`View users who exhausted plan on ${b.label}`}
           >
             <div className="flex items-center gap-1.5">
               <span
@@ -685,7 +688,7 @@ function PlanExhaustionSection({ data }: { data: PlanExhaustionData }) {
               {b.count}
             </div>
             <div className="text-[10px] text-zinc-400">users</div>
-          </div>
+          </a>
         ))}
       </div>
 
@@ -1039,12 +1042,31 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   );
 }
 
-function MiniKpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 min-w-0 flex-1">
+function MiniKpi({
+  label,
+  value,
+  sub,
+  href,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  href?: string;
+}) {
+  const content = (
+    <>
       <div className="text-[10px] text-zinc-400 truncate">{label}</div>
       <div className="text-lg font-bold tracking-tight leading-tight text-zinc-100">{value}</div>
       {sub && <div className="text-[10px] text-zinc-400 truncate">{sub}</div>}
-    </div>
+    </>
   );
+  const className = `bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 min-w-0 flex-1${href ? " hover:border-zinc-600 transition-colors cursor-pointer" : ""}`;
+  if (href) {
+    return (
+      <a href={href} className={className}>
+        {content}
+      </a>
+    );
+  }
+  return <div className={className}>{content}</div>;
 }

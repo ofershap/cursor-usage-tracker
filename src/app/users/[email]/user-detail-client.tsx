@@ -85,6 +85,11 @@ interface UserStats {
       aiPercent: number;
     } | null;
   } | null;
+  planExhaustion: {
+    daysToExhaust: number;
+    usageBasedReqs: number;
+    cycleDay: number;
+  } | null;
 }
 
 interface UserDetailClientProps {
@@ -264,6 +269,16 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
               : "No rank data"
           }
           href={stats.group ? `/?group=${stats.group.id}` : "/"}
+        />
+        <KpiCard
+          label="Plan Exhausted"
+          value={stats.planExhaustion ? `Day ${stats.planExhaustion.daysToExhaust}` : "Not yet"}
+          sub={
+            stats.planExhaustion
+              ? `${stats.planExhaustion.usageBasedReqs.toLocaleString()} extra reqs (day ${stats.planExhaustion.cycleDay} of cycle)`
+              : "Still within included plan"
+          }
+          alert={stats.planExhaustion != null && stats.planExhaustion.daysToExhaust <= 7}
         />
       </div>
 
