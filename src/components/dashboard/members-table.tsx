@@ -341,6 +341,7 @@ export function MembersTable({
                 className={`${activeBadgeCfg.color} px-1.5 py-0.5 rounded text-[10px] font-medium`}
               >
                 {activeBadgeCfg.label}
+                <span className="ml-1 opacity-70">({data.length})</span>
               </span>
               <button
                 onClick={() => onBadgeFilter(null)}

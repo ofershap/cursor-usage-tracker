@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AreaChart,
   Area,
@@ -122,6 +122,19 @@ interface InsightsData {
 
 import { formatDateTick, formatDateLabel } from "@/lib/date-utils";
 
+interface GroupInfo {
+  id: string;
+  name: string;
+  member_count: number;
+  emails: string[];
+}
+
+const TIME_RANGES = [
+  { label: "7d", days: 7 },
+  { label: "14d", days: 14 },
+  { label: "30d", days: 30 },
+];
+
 const COLORS = [
   "#3b82f6",
   "#8b5cf6",
@@ -142,7 +155,55 @@ function fmt(n: number): string {
   return n.toLocaleString();
 }
 
-export function InsightsClient({ data }: { data: InsightsData }) {
+export function InsightsClient({
+  initialData,
+  groups,
+}: {
+  initialData: InsightsData;
+  groups: GroupInfo[];
+}) {
+  const [data, setData] = useState<InsightsData>(initialData);
+  const [days, setDays] = useState(30);
+  const [selectedGroup, setSelectedGroup] = useState("all");
+  const [loading, setLoading] = useState(false);
+
+  const parentGroups = useMemo(() => {
+    const map = new Map<string, { count: number; children: GroupInfo[] }>();
+    for (const g of groups) {
+      if (g.name === "Unassigned") continue;
+      const parts = g.name.split(" > ");
+      const parent = parts[0] ?? g.name;
+      const existing = map.get(parent) ?? { count: 0, children: [] };
+      existing.count += g.member_count;
+      existing.children.push(g);
+      map.set(parent, existing);
+    }
+    return map;
+  }, [groups]);
+
+  const isFiltered = selectedGroup !== "all";
+
+  const fetchData = useCallback(async (newDays: number, group: string) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ days: String(newDays) });
+      if (group !== "all") params.set("group", group);
+      const res = await fetch(`/api/analytics?${params}`);
+      if (res.ok) setData(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const isDefault = days === 30 && selectedGroup === "all";
+
+  useEffect(() => {
+    if (isDefault) {
+      setData(initialData);
+      return;
+    }
+    fetchData(days, selectedGroup);
+  }, [days, selectedGroup, fetchData, isDefault, initialData]);
   const dauSummary = useMemo(() => {
     if (!data.dau.length) return { avgDau: 0, peakDau: 0 };
     const avg = Math.round(data.dau.reduce((s, d) => s + d.dau, 0) / data.dau.length);
@@ -191,11 +252,71 @@ export function InsightsClient({ data }: { data: InsightsData }) {
 
   const totalCommands = mergedCommands.reduce((s, d) => s + d.total_usage, 0);
 
+  const selectedGroupName = useMemo(() => {
+    if (selectedGroup === "all") return "All Teams";
+    if (selectedGroup.startsWith("parent:")) return selectedGroup.replace("parent:", "");
+    const g = groups.find((g) => g.id === selectedGroup);
+    return g?.name ?? selectedGroup;
+  }, [selectedGroup, groups]);
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-sm font-semibold text-zinc-200">Team Insights</h1>
-        <span className="text-[10px] text-zinc-400">Last 30 days · Analytics API</span>
+        <div className="flex items-center gap-2">
+          {loading && (
+            <div className="w-3.5 h-3.5 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+          )}
+          {groups.length > 1 && (
+            <select
+              value={selectedGroup}
+              onChange={(e) => setSelectedGroup(e.target.value)}
+              className="bg-zinc-800 border border-zinc-700 rounded-md px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500/50 max-w-[200px] truncate"
+            >
+              <option value="all">All Teams</option>
+              {[...parentGroups.entries()].map(([parent, info]) => {
+                const hasChildren = info.children.length > 1;
+                return hasChildren ? (
+                  <optgroup key={parent} label={`${parent} (${info.count})`}>
+                    <option value={`parent:${parent}`}>
+                      All {parent} ({info.count})
+                    </option>
+                    {info.children.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name.split(" > ")[1] ?? g.name} ({g.member_count})
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : (
+                  <option key={info.children[0]?.id} value={info.children[0]?.id}>
+                    {info.children[0]?.name} ({info.children[0]?.member_count})
+                  </option>
+                );
+              })}
+              {(() => {
+                const unassigned = groups.find((g) => g.name === "Unassigned");
+                return unassigned ? (
+                  <option value={unassigned.id}>Unassigned ({unassigned.member_count})</option>
+                ) : null;
+              })()}
+            </select>
+          )}
+          <div className="flex bg-zinc-800 rounded-md p-0.5">
+            {TIME_RANGES.map((r) => (
+              <button
+                key={r.days}
+                onClick={() => setDays(r.days)}
+                className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                  days === r.days
+                    ? "bg-zinc-700 text-zinc-100"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* KPI Strip */}
@@ -205,7 +326,7 @@ export function InsightsClient({ data }: { data: InsightsData }) {
           value={dauSummary.avgDau.toString()}
           sub={`Peak: ${dauSummary.peakDau}`}
         />
-        <MiniKpi label="Commands" value={fmt(totalCommands)} sub="30d total" />
+        <MiniKpi label="Commands" value={fmt(totalCommands)} sub={`${days}d total`} />
         <MiniKpi label="Agent Lines" value={fmt(totalAgentLines)} sub="accepted" />
         <MiniKpi label="Tab Lines" value={fmt(totalTabLines)} sub="accepted" />
         <MiniKpi label="MCP Tools" value={data.mcp.length.toString()} sub="unique tools" />
@@ -217,7 +338,114 @@ export function InsightsClient({ data }: { data: InsightsData }) {
       )}
 
       {/* Model Cost vs Value */}
-      {data.modelEfficiency.length > 0 && <ModelEfficiencySection data={data.modelEfficiency} />}
+      {data.modelEfficiency.length > 0 && (
+        <ModelEfficiencySection
+          data={data.modelEfficiency}
+          days={days}
+          groupName={isFiltered ? selectedGroupName : undefined}
+        />
+      )}
+
+      {/* Adoption Row: Commands + MCP Tools (filtered) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <ChartCard
+          title={
+            isFiltered ? `Commands Adoption · ${selectedGroupName}` : "Commands Adoption (Top 20)"
+          }
+        >
+          <div className="overflow-y-auto max-h-[200px]">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-zinc-900">
+                <tr className="text-zinc-500 border-b border-zinc-800">
+                  <th className="text-left py-1 font-medium">Command</th>
+                  <th className="text-right py-1 font-medium">Total Usage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mergedCommands.slice(0, 20).map((row, i) => (
+                  <tr
+                    key={`${row.command_name}-${i}`}
+                    className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
+                  >
+                    <td className="py-1 text-zinc-300 font-mono">{row.command_name}</td>
+                    <td className="text-right py-1">
+                      <div className="flex items-center justify-end gap-1">
+                        <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.min(
+                                (row.total_usage / (mergedCommands[0]?.total_usage || 1)) * 100,
+                                100,
+                              )}%`,
+                              backgroundColor: COLORS[i % COLORS.length],
+                            }}
+                          />
+                        </div>
+                        <span className="font-mono">{fmt(row.total_usage)}</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </ChartCard>
+
+        <ChartCard
+          title={
+            isFiltered ? `MCP Tool Adoption · ${selectedGroupName}` : "MCP Tool Adoption (Top 20)"
+          }
+        >
+          <div className="overflow-y-auto max-h-[200px]">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-zinc-900">
+                <tr className="text-zinc-500 border-b border-zinc-800">
+                  <th className="text-left py-1 font-medium">Server</th>
+                  <th className="text-left py-1 font-medium">Tool</th>
+                  <th className="text-right py-1 font-medium">Calls</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.mcp.map((row, i) => (
+                  <tr
+                    key={`${row.server_name}-${row.tool_name}`}
+                    className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
+                  >
+                    <td className="py-1 text-zinc-400 font-mono">{row.server_name}</td>
+                    <td className="py-1 text-zinc-300 font-mono">{row.tool_name}</td>
+                    <td className="text-right py-1">
+                      <div className="flex items-center justify-end gap-1">
+                        <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.min((row.total_usage / (data.mcp[0]?.total_usage || 1)) * 100, 100)}%`,
+                              backgroundColor: COLORS[i % COLORS.length],
+                            }}
+                          />
+                        </div>
+                        <span className="font-mono">{fmt(row.total_usage)}</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </ChartCard>
+      </div>
+
+      {/* Divider: team-wide section */}
+      {isFiltered && (
+        <div className="flex items-center gap-3 pt-2">
+          <div className="flex-1 h-px bg-zinc-800" />
+          <span className="text-[10px] text-zinc-500 shrink-0">
+            Team-wide analytics (not filtered by group)
+          </span>
+          <div className="flex-1 h-px bg-zinc-800" />
+        </div>
+      )}
 
       {/* Charts Row: DAU + Model Adoption */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -328,9 +556,9 @@ export function InsightsClient({ data }: { data: InsightsData }) {
         </ChartCard>
       </div>
 
-      {/* Tables Row: Model Breakdown + MCP Tools */}
+      {/* Tables Row: Model Breakdown + File Extensions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <ChartCard title="Model Usage Breakdown (30d)">
+        <ChartCard title={`Model Usage Breakdown (${days}d)`}>
           <div className="overflow-y-auto max-h-[200px]">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-zinc-900">
@@ -401,88 +629,6 @@ export function InsightsClient({ data }: { data: InsightsData }) {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </ChartCard>
-      </div>
-
-      {/* Adoption Row: Commands + MCP Tools */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <ChartCard title="Commands Adoption (Top 20)">
-          <div className="overflow-y-auto max-h-[200px]">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-zinc-900">
-                <tr className="text-zinc-500 border-b border-zinc-800">
-                  <th className="text-left py-1 font-medium">Command</th>
-                  <th className="text-right py-1 font-medium">Total Usage</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mergedCommands.slice(0, 20).map((row, i) => (
-                  <tr
-                    key={`${row.command_name}-${i}`}
-                    className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
-                  >
-                    <td className="py-1 text-zinc-300 font-mono">{row.command_name}</td>
-                    <td className="text-right py-1">
-                      <div className="flex items-center justify-end gap-1">
-                        <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${Math.min(
-                                (row.total_usage / (mergedCommands[0]?.total_usage || 1)) * 100,
-                                100,
-                              )}%`,
-                              backgroundColor: COLORS[i % COLORS.length],
-                            }}
-                          />
-                        </div>
-                        <span className="font-mono">{fmt(row.total_usage)}</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </ChartCard>
-
-        <ChartCard title="MCP Tool Adoption (Top 20)">
-          <div className="overflow-y-auto max-h-[200px]">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-zinc-900">
-                <tr className="text-zinc-500 border-b border-zinc-800">
-                  <th className="text-left py-1 font-medium">Server</th>
-                  <th className="text-left py-1 font-medium">Tool</th>
-                  <th className="text-right py-1 font-medium">Calls</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.mcp.map((row, i) => (
-                  <tr
-                    key={`${row.server_name}-${row.tool_name}`}
-                    className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
-                  >
-                    <td className="py-1 text-zinc-400 font-mono">{row.server_name}</td>
-                    <td className="py-1 text-zinc-300 font-mono">{row.tool_name}</td>
-                    <td className="text-right py-1">
-                      <div className="flex items-center justify-end gap-1">
-                        <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${Math.min((row.total_usage / (data.mcp[0]?.total_usage || 1)) * 100, 100)}%`,
-                              backgroundColor: COLORS[i % COLORS.length],
-                            }}
-                          />
-                        </div>
-                        <span className="font-mono">{fmt(row.total_usage)}</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </ChartCard>
       </div>
 
@@ -737,11 +883,20 @@ function PlanExhaustionSection({ data }: { data: PlanExhaustionData }) {
   );
 }
 
-function ModelEfficiencySection({ data }: { data: ModelEfficiencyEntry[] }) {
+function ModelEfficiencySection({
+  data,
+  days,
+  groupName,
+}: {
+  data: ModelEfficiencyEntry[];
+  days: number;
+  groupName?: string;
+}) {
   const [showDetail, setShowDetail] = useState(false);
 
+  const minSpend = groupName ? 0 : 30;
   const qualified = data
-    .filter((d) => d.total_spend_usd >= 30)
+    .filter((d) => d.total_spend_usd >= minSpend)
     .map((d) => ({
       model: shortModel(d.model),
       fullModel: d.model,
@@ -767,12 +922,16 @@ function ModelEfficiencySection({ data }: { data: ModelEfficiencyEntry[] }) {
 
   const maxSpend = bySpend[0]?.total_spend_usd ?? 1;
 
+  const subtitle = groupName
+    ? `${groupName} · Last ${days} days`
+    : `Models with $30+ spend · Last ${days} days`;
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-zinc-200">Model Rankings</h2>
-          <p className="text-[10px] text-zinc-400 mt-0.5">Models with $30+ spend · Last 30 days</p>
+          <p className="text-[10px] text-zinc-400 mt-0.5">{subtitle}</p>
         </div>
         <button
           onClick={() => setShowDetail((v) => !v)}
@@ -1033,10 +1192,25 @@ function RankingCard({
   );
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({
+  title,
+  badge,
+  children,
+}: {
+  title: string;
+  badge?: "team-wide";
+  children: React.ReactNode;
+}) {
   return (
     <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-      <h3 className="text-xs font-medium text-zinc-400 mb-3">{title}</h3>
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-xs font-medium text-zinc-400">{title}</h3>
+        {badge === "team-wide" && (
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700">
+            team-wide
+          </span>
+        )}
+      </div>
       {children}
     </div>
   );

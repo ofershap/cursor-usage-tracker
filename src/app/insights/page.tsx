@@ -11,6 +11,7 @@ import {
   getUsersByClientVersion,
   getModelEfficiency,
   getPlanExhaustionStats,
+  getGroupsWithMembers,
 } from "@/lib/db";
 import { InsightsClient } from "./insights-client";
 
@@ -33,7 +34,9 @@ export default function InsightsPage() {
       planExhaustion: getPlanExhaustionStats(),
     };
 
-    return <InsightsClient data={data} />;
+    const groups = getGroupsWithMembers();
+
+    return <InsightsClient initialData={data} groups={groups} />;
   } catch {
     return (
       <div className="text-center py-20">

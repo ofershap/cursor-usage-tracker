@@ -2037,8 +2037,23 @@ export function getAnalyticsTabsTrend(
 
 export function getAnalyticsMCPSummary(
   days: number = 30,
+  emails?: string[],
 ): Array<{ server_name: string; tool_name: string; total_usage: number }> {
   const db = getDb();
+  if (emails?.length) {
+    const placeholders = emails.map(() => "?").join(",");
+    return db
+      .prepare(
+        `SELECT server_name, tool_name, SUM(usage) as total_usage
+         FROM analytics_user_mcp WHERE date >= date('now', ?) AND email IN (${placeholders})
+         GROUP BY server_name, tool_name ORDER BY total_usage DESC LIMIT 20`,
+      )
+      .all(`-${days} days`, ...emails) as Array<{
+      server_name: string;
+      tool_name: string;
+      total_usage: number;
+    }>;
+  }
   return db
     .prepare(
       `
@@ -2129,9 +2144,14 @@ export interface ModelEfficiency {
   cost_per_useful_line: number;
 }
 
-export function getModelEfficiency(): ModelEfficiency[] {
+export function getModelEfficiency(emails?: string[]): ModelEfficiency[] {
   const db = getDb();
   const hasUE = (db.prepare("SELECT COUNT(*) as c FROM usage_events").get() as { c: number }).c > 0;
+  const emailFilter = emails?.length ? `AND du.email IN (${emails.map(() => "?").join(",")})` : "";
+  const emailFilterUE = emails?.length
+    ? `WHERE user_email IN (${emails.map(() => "?").join(",")})`
+    : "";
+  const params = emails?.length ? [...emails] : [];
 
   return db
     .prepare(
@@ -2140,7 +2160,7 @@ export function getModelEfficiency(): ModelEfficiency[] {
     WITH model_spend AS (
       SELECT date(timestamp/1000, 'unixepoch') as date, user_email as email,
         model, ROUND(SUM(total_cents)) as spend_cents
-      FROM usage_events GROUP BY date, user_email, model
+      FROM usage_events ${emailFilterUE} GROUP BY date, user_email, model
     )
     SELECT
       du.most_used_model as model,
@@ -2166,8 +2186,9 @@ export function getModelEfficiency(): ModelEfficiency[] {
       AND du.most_used_model != ''
       AND du.agent_requests > 0
       AND ms.spend_cents > 0
+      ${emailFilter}
     GROUP BY du.most_used_model
-    HAVING COUNT(DISTINCT du.email) >= 3 AND SUM(ms.spend_cents) >= 2000
+    HAVING COUNT(DISTINCT du.email) >= ${emails?.length ? "1" : "3"} AND SUM(ms.spend_cents) >= ${emails?.length ? "0" : "2000"}
     ORDER BY total_spend_usd DESC`
         : `
     SELECT
@@ -2191,17 +2212,18 @@ export function getModelEfficiency(): ModelEfficiency[] {
     FROM daily_usage du
     JOIN (
       SELECT date, email, MAX(spend_cents) as spend_cents
-      FROM daily_spend GROUP BY date, email
+      FROM daily_spend ${emails?.length ? `WHERE email IN (${emails.map(() => "?").join(",")})` : ""} GROUP BY date, email
     ) ds ON du.email = ds.email AND du.date = ds.date
     WHERE du.is_active = 1
       AND du.most_used_model != ''
       AND du.agent_requests > 0
       AND ds.spend_cents > 0
+      ${emailFilter}
     GROUP BY du.most_used_model
-    HAVING COUNT(DISTINCT du.email) >= 3 AND SUM(ds.spend_cents) >= 2000
+    HAVING COUNT(DISTINCT du.email) >= ${emails?.length ? "1" : "3"} AND SUM(ds.spend_cents) >= ${emails?.length ? "0" : "2000"}
     ORDER BY total_spend_usd DESC`,
     )
-    .all() as ModelEfficiency[];
+    .all(...(hasUE ? [...params, ...params] : [...params, ...params])) as ModelEfficiency[];
 }
 
 export function getAllMembers(): Array<TeamMember & { first_seen: string; last_seen: string }> {
@@ -2384,8 +2406,19 @@ export function upsertAnalyticsCommands(entries: AnalyticsCommandsEntry[]): void
 
 export function getAnalyticsCommandsSummary(
   days: number = 30,
+  emails?: string[],
 ): Array<{ command_name: string; total_usage: number }> {
   const db = getDb();
+  if (emails?.length) {
+    const placeholders = emails.map(() => "?").join(",");
+    return db
+      .prepare(
+        `SELECT command_name, SUM(usage) as total_usage
+         FROM analytics_user_commands WHERE date >= date('now', ?) AND email IN (${placeholders})
+         GROUP BY command_name ORDER BY total_usage DESC`,
+      )
+      .all(`-${days} days`, ...emails) as Array<{ command_name: string; total_usage: number }>;
+  }
   return db
     .prepare(
       `
@@ -2731,7 +2764,7 @@ export function getAnalyticsPlansSummary(
     .all(`-${days} days`) as Array<{ model: string; total_usage: number }>;
 }
 
-export function getPlanExhaustionStats(): {
+export function getPlanExhaustionStats(emails?: string[]): {
   summary: {
     users_exhausted: number;
     total_active: number;
@@ -2763,6 +2796,9 @@ export function getPlanExhaustionStats(): {
       users: [],
     };
 
+  const emailFilter = emails?.length ? `AND du.email IN (${emails.map(() => "?").join(",")})` : "";
+  const emailParams = emails?.length ? [...emails] : [];
+
   const users = db
     .prepare(
       `SELECT du.email, m.name,
@@ -2770,23 +2806,27 @@ export function getPlanExhaustionStats(): {
          SUM(du.usage_based_reqs) as usage_based_reqs
        FROM daily_usage du
        LEFT JOIN members m ON du.email = m.email
-       WHERE du.date >= ? AND du.usage_based_reqs > 0
+       WHERE du.date >= ? AND du.usage_based_reqs > 0 ${emailFilter}
        GROUP BY du.email
        ORDER BY days_to_exhaust ASC`,
     )
-    .all(cycleStart, cycleStart) as Array<{
+    .all(cycleStart, cycleStart, ...emailParams) as Array<{
     email: string;
     name: string;
     days_to_exhaust: number;
     usage_based_reqs: number;
   }>;
 
+  const emailFilterSimple = emails?.length
+    ? `AND email IN (${emails.map(() => "?").join(",")})`
+    : "";
+
   const totalActive = (
     db
       .prepare(
-        "SELECT COUNT(DISTINCT email) as total FROM daily_usage WHERE date >= ? AND agent_requests > 0",
+        `SELECT COUNT(DISTINCT email) as total FROM daily_usage WHERE date >= ? AND agent_requests > 0 ${emailFilterSimple}`,
       )
-      .get(cycleStart) as { total: number }
+      .get(cycleStart, ...emailParams) as { total: number }
   ).total;
 
   const days = users.map((u) => u.days_to_exhaust).sort((a, b) => a - b);
