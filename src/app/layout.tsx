@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { NavLinks } from "@/components/nav-links";
+import { UpgradeBanner } from "@/components/upgrade-banner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,7 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </Link>
                 <NavLinks />
               </div>
-              <div className="text-xs text-zinc-500">cursor-usage-tracker</div>
+              <UpgradeBanner />
             </div>
           </div>
         </nav>
