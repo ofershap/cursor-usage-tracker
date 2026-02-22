@@ -9,11 +9,12 @@ Open-source Cursor IDE usage monitoring, anomaly detection, and alerting for ent
 
 ## Project Goals
 
-This dashboard answers three questions:
+This dashboard answers four questions:
 
 1. **Cost monitoring** - Are we spending too much? Who's driving it? Why?
-2. **Adoption tracking** - Is everyone using the tool we're paying for?
-3. **Usage understanding** - How is each person working with AI?
+2. **Cost optimization** - Who's using expensive models when cheaper ones would do? How much would switching save?
+3. **Adoption tracking** - Is everyone using the tool we're paying for?
+4. **Usage understanding** - How is each person working with AI?
 
 It is NOT a developer performance measurement tool. Cursor metrics cannot tell you if someone shipped a great feature or wrote bad code. The dashboard monitors cost, adoption, and usage patterns.
 

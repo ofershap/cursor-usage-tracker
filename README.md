@@ -5,7 +5,7 @@
 <h1 align="center">Cursor Usage Tracker</h1>
 
 <p align="center">
-  Open-source cost monitoring for Cursor Enterprise teams. Track AI spend per developer, detect anomalies automatically, and get Slack alerts before the invoice surprises you. Self-host with Docker or <a href="https://cursor-usage-tracker.sticklight.app">let us run it for you</a>.
+  Open-source cost monitoring and optimization for Cursor Enterprise teams. Track AI spend per developer, spot unnecessary expensive model usage, detect anomalies automatically, and get Slack alerts before the invoice surprises you. Self-host with Docker or <a href="https://cursor-usage-tracker.sticklight.app">let us run it for you</a>.
 </p>
 
 <p align="center">
@@ -41,8 +41,9 @@ I built cursor-usage-tracker to fix that. It sits on top of Cursor's Enterprise 
 ## What This Dashboard Answers
 
 1. **Cost monitoring** - Are we spending too much? Who's driving it? Why?
-2. **Adoption tracking** - Is everyone using the tool we're paying for?
-3. **Usage understanding** - How is each person working with AI?
+2. **Cost optimization** - Who's using expensive models when cheaper ones would do? How much would switching save?
+3. **Adoption tracking** - Is everyone using the tool we're paying for?
+4. **Usage understanding** - How is each person working with AI?
 
 ---
 
@@ -66,12 +67,13 @@ Developer uses Cursor → API collects data hourly → Engine detects anomaly �
 
 ### How It Works
 
-| What happens                               | Example                                                                       |
-| ------------------------------------------ | ----------------------------------------------------------------------------- |
-| A developer exceeds the spend limit        | `Bob spent $82 this cycle (limit: $50)` → Slack alert                         |
-| Someone's daily spend spikes               | `Alice: daily spend spiked to $214 (4.2x her 7-day avg of $51)` → Slack alert |
-| A user's cycle spend is far above the team | `Bob: cycle spend $957 is 5.1x the team median ($188)` → Slack alert          |
-| A user is statistically far from the team  | `Bob: daily spend $214 is 3.2σ above team mean ($42)` → Slack alert           |
+| What happens                                          | Example                                                                                                  |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| A developer exceeds the spend limit                   | `Bob spent $82 this cycle (limit: $50)` → Slack alert                                                    |
+| Someone's daily spend spikes                          | `Alice: daily spend spiked to $214 (4.2x her 7-day avg of $51)` → Slack alert                            |
+| A user's cycle spend is far above the team            | `Bob: cycle spend $957 is 5.1x the team median ($188)` → Slack alert                                     |
+| A user is statistically far from the team             | `Bob: daily spend $214 is 3.2σ above team mean ($42)` → Slack alert                                      |
+| A developer uses an expensive model when others don't | `Bob averaged $4.20/req on claude-opus-max (team median: $0.52 on sonnet)` → Model cost comparison table |
 
 Every alert includes who, what model, how much, and a link to their dashboard page so you can investigate immediately.
 
