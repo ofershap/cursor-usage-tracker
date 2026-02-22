@@ -1,5 +1,7 @@
 "use client";
 
+import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   BarChart,
   Bar,
@@ -27,7 +29,15 @@ const TOOLTIP_STYLE = {
 const TOOLTIP_LABEL_STYLE = { color: "#fafafa" } as const;
 const TOOLTIP_ITEM_STYLE = { color: "#fafafa" } as const;
 
+const BAR_COLOR = "#3b82f6";
+const BAR_HOVER_COLOR = "#60a5fa";
+const HIGHLIGHT_COLOR = "#f59e0b";
+const HIGHLIGHT_HOVER_COLOR = "#fbbf24";
+
 export function SpendBarChart({ data, highlightEmail }: SpendBarChartProps) {
+  const router = useRouter();
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
   const chartData = data.slice(0, 8).map((d) => ({
     label: `#${d.spend_rank} ${d.name.split(" ")[0] ?? d.email.split("@")[0]}`,
     spend: d.spend_cents / 100,
@@ -36,11 +46,30 @@ export function SpendBarChart({ data, highlightEmail }: SpendBarChartProps) {
     name: d.name,
   }));
 
+  const handleBarClick = useCallback(
+    (entry: (typeof chartData)[number]) => {
+      router.push(`/users/${encodeURIComponent(entry.email)}`);
+    },
+    [router],
+  );
+
+  const getFill = (entry: (typeof chartData)[number], index: number) => {
+    const isHighlight = entry.email === highlightEmail;
+    const isHovered = hoveredIndex === index;
+    if (isHighlight) return isHovered ? HIGHLIGHT_HOVER_COLOR : HIGHLIGHT_COLOR;
+    return isHovered ? BAR_HOVER_COLOR : BAR_COLOR;
+  };
+
   return (
     <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
       <h3 className="text-xs font-medium text-zinc-400 mb-2">Top Spenders (Current Cycle)</h3>
       <ResponsiveContainer width="100%" height={240}>
-        <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 50 }}>
+        <BarChart
+          data={chartData}
+          layout="vertical"
+          margin={{ left: 10, right: 50 }}
+          style={{ cursor: "pointer" }}
+        >
           <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
           <XAxis
             type="number"
@@ -60,18 +89,29 @@ export function SpendBarChart({ data, highlightEmail }: SpendBarChartProps) {
             contentStyle={TOOLTIP_STYLE}
             labelStyle={TOOLTIP_LABEL_STYLE}
             itemStyle={TOOLTIP_ITEM_STYLE}
-            cursor={{ fill: "rgba(255,255,255,0.05)" }}
+            cursor={{ fill: "rgba(255,255,255,0.08)" }}
             formatter={(value) => [`$${Number(value).toFixed(2)}`, "Spend"]}
             labelFormatter={(_label, payload) => {
               const item = payload?.[0]?.payload;
               return item ? `#${item.rank} ${item.name} (${item.email})` : String(_label);
             }}
           />
-          <Bar dataKey="spend" radius={[0, 4, 4, 0]}>
-            {chartData.map((entry) => (
+          <Bar
+            dataKey="spend"
+            radius={[0, 4, 4, 0]}
+            onClick={(_data, index) => {
+              const entry = chartData[index];
+              if (entry) handleBarClick(entry);
+            }}
+            onMouseEnter={(_data, index) => setHoveredIndex(index)}
+            onMouseLeave={() => setHoveredIndex(null)}
+          >
+            {chartData.map((entry, index) => (
               <Cell
                 key={entry.email}
-                fill={entry.email === highlightEmail ? "#f59e0b" : "#3b82f6"}
+                fill={getFill(entry, index)}
+                style={{ transition: "fill 0.15s ease, filter 0.15s ease" }}
+                filter={hoveredIndex === index ? "brightness(1.15)" : undefined}
               />
             ))}
             <LabelList
