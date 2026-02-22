@@ -418,7 +418,7 @@ export function InsightsClient({ data }: { data: InsightsData }) {
               <tbody>
                 {mergedCommands.slice(0, 20).map((row, i) => (
                   <tr
-                    key={row.command_name}
+                    key={`${row.command_name}-${i}`}
                     className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
                   >
                     <td className="py-1 text-zinc-300 font-mono">{row.command_name}</td>

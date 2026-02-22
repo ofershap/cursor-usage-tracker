@@ -75,7 +75,7 @@ function buildVoiceSettings(script: DemoScript) {
 }
 
 async function generateSample(client: ElevenLabsClient, voice: VoiceCandidate, script: DemoScript) {
-  const sampleText = script.scenes[0].narration;
+  const sampleText = script.scenes[0]?.narration ?? "";
   const outPath = path.join(OUTPUT_DIR, `sample-${voice.name.toLowerCase()}.mp3`);
 
   console.log(`  Generating sample for "${voice.name}" → ${outPath}`);

@@ -410,8 +410,11 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
                   Commands
                 </div>
                 <div className="space-y-1.5">
-                  {stats.commandsSummary.slice(0, 10).map((c) => (
-                    <div key={c.command_name} className="flex items-center justify-between text-xs">
+                  {stats.commandsSummary.slice(0, 10).map((c, i) => (
+                    <div
+                      key={`${c.command_name}-${i}`}
+                      className="flex items-center justify-between text-xs"
+                    >
                       <span className="text-zinc-300">{c.command_name}</span>
                       <span className="font-mono text-zinc-500">
                         {c.total_usage.toLocaleString()}

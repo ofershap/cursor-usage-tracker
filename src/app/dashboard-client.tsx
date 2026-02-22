@@ -480,6 +480,11 @@ export interface DailySpendDataPoint {
   [key: string]: string | number;
 }
 
+function shortDisplayName(fullName: string): string {
+  const parts = fullName.split(" ");
+  return parts[0] ?? fullName;
+}
+
 function buildDailySpendData(breakdown: SpendBreakdownRow[]): {
   points: DailySpendDataPoint[];
   topNames: string[];
@@ -488,10 +493,28 @@ function buildDailySpendData(breakdown: SpendBreakdownRow[]): {
   for (const row of breakdown) {
     spendByUser.set(row.name, (spendByUser.get(row.name) ?? 0) + row.spend_cents);
   }
-  const topNames = [...spendByUser.entries()]
+  const topFullNames = [...spendByUser.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 6)
-    .map(([name]) => name.split(" ")[0] ?? name);
+    .map(([name]) => name);
+
+  const firstNameCount = new Map<string, number>();
+  for (const name of topFullNames) {
+    const first = shortDisplayName(name);
+    firstNameCount.set(first, (firstNameCount.get(first) ?? 0) + 1);
+  }
+  const fullToDisplay = new Map<string, string>();
+  for (const name of topFullNames) {
+    const first = shortDisplayName(name);
+    if ((firstNameCount.get(first) ?? 0) > 1) {
+      const lastInitial = name.split(" ")[1]?.[0] ?? "";
+      fullToDisplay.set(name, `${first} ${lastInitial}.`);
+    } else {
+      fullToDisplay.set(name, first);
+    }
+  }
+
+  const topNames = topFullNames.map((n) => fullToDisplay.get(n) ?? n);
 
   const byDate = new Map<string, DailySpendDataPoint>();
   for (const row of breakdown) {
@@ -501,11 +524,11 @@ function buildDailySpendData(breakdown: SpendBreakdownRow[]): {
       byDate.set(row.date, point);
     }
     const point = byDate.get(row.date) as Record<string, number>;
-    const firstName = row.name.split(" ")[0] ?? row.name;
+    const display = fullToDisplay.get(row.name);
     const dollars = row.spend_cents / 100;
     point.total = (point.total ?? 0) + dollars;
-    if (topNames.includes(firstName)) {
-      point[firstName] = (point[firstName] as number) + dollars;
+    if (display) {
+      point[display] = (point[display] as number) + dollars;
     } else {
       point.Others = (point.Others as number) + dollars;
     }
