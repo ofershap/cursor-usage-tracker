@@ -25,6 +25,7 @@ interface ModelCost {
   avg_spend: number;
   total_spend: number;
   total_reqs: number;
+  emails: string[];
 }
 
 const TIME_RANGES = [
@@ -73,6 +74,10 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
   const [selectedGroup, setSelectedGroup] = useState("all");
   const [exhaustionFilter, setExhaustionFilter] = useState<{
     label: string;
+    emails: Set<string>;
+  } | null>(null);
+  const [modelFilter, setModelFilter] = useState<{
+    model: string;
     emails: Set<string>;
   } | null>(null);
 
@@ -200,6 +205,9 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
     if (exhaustionFilter) {
       users = users.filter((u) => exhaustionFilter.emails.has(u.email));
     }
+    if (modelFilter) {
+      users = users.filter((u) => modelFilter.emails.has(u.email));
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       users = users.filter(
@@ -240,7 +248,16 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
       }
     });
     return sorted;
-  }, [stats.rankedUsers, search, sortCol, sortAsc, groupEmailSet, badgeFilter, exhaustionFilter]);
+  }, [
+    stats.rankedUsers,
+    search,
+    sortCol,
+    sortAsc,
+    groupEmailSet,
+    badgeFilter,
+    exhaustionFilter,
+    modelFilter,
+  ]);
 
   const searchedUser = useMemo(() => {
     if (!search.trim()) return null;
@@ -270,7 +287,8 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
     search.trim().length > 0 ||
     selectedGroup !== "all" ||
     badgeFilter !== null ||
-    exhaustionFilter !== null;
+    exhaustionFilter !== null ||
+    modelFilter !== null;
   const totalLines = stats.dailyTeamActivity.reduce((s, d) => s + d.total_lines_added, 0);
   const effectiveDays = Math.min(days, stats.cycleDays);
   const cycleStartDate = new Date(stats.cycleStart);
@@ -409,6 +427,17 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
             </button>
           </span>
         )}
+        {modelFilter && (
+          <span className="inline-flex items-center gap-1.5 bg-purple-600/20 text-purple-300 rounded-md px-2 py-1 text-[11px] font-medium">
+            Model: {shortModel(modelFilter.model)} ({modelFilter.emails.size})
+            <button
+              onClick={() => setModelFilter(null)}
+              className="hover:text-purple-100 cursor-pointer"
+            >
+              ✕
+            </button>
+          </span>
+        )}
         <div className="ml-auto text-[11px] text-zinc-600">
           {isSearching ? `${filteredUsers.length} / ` : ""}
           {stats.totalMembers} members
@@ -501,7 +530,15 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
           />
         </ExpandableCard>
         <ExpandableCard>
-          <ModelCostComparison data={data.modelCosts} />
+          <ModelCostComparison
+            data={data.modelCosts}
+            activeModel={modelFilter?.model ?? null}
+            onModelFilter={(model, emails) => {
+              setModelFilter((prev) =>
+                prev?.model === model ? null : { model, emails: new Set(emails) },
+              );
+            }}
+          />
         </ExpandableCard>
       </div>
 
@@ -604,7 +641,15 @@ function buildDailySpendData(breakdown: SpendBreakdownRow[]): {
   };
 }
 
-function ModelCostComparison({ data }: { data: ModelCost[] }) {
+function ModelCostComparison({
+  data,
+  activeModel,
+  onModelFilter,
+}: {
+  data: ModelCost[];
+  activeModel: string | null;
+  onModelFilter: (model: string, emails: string[]) => void;
+}) {
   const rows = data
     .filter((d) => d.total_reqs > 0)
     .map((d) => ({
@@ -651,7 +696,10 @@ function ModelCostComparison({ data }: { data: ModelCost[] }) {
               const mult = cheapest > 0 ? row.costPerReq / cheapest : 1;
               const barPct = maxCostPerReq > 0 ? (row.costPerReq / maxCostPerReq) * 100 : 0;
               return (
-                <tr key={row.model} className="border-b border-zinc-800/30 hover:bg-zinc-800/30">
+                <tr
+                  key={row.model}
+                  className={`border-b border-zinc-800/30 hover:bg-zinc-800/30 ${activeModel === row.model ? "bg-purple-500/10" : ""}`}
+                >
                   <td className="py-1 text-zinc-300 font-mono cursor-default" title={row.model}>
                     {shortModel(row.model)}
                   </td>
@@ -671,7 +719,15 @@ function ModelCostComparison({ data }: { data: ModelCost[] }) {
                       </span>
                     </div>
                   </td>
-                  <td className="text-right py-1 text-zinc-400">{row.users}</td>
+                  <td className="text-right py-1">
+                    <button
+                      onClick={() => onModelFilter(row.model, row.emails)}
+                      className={`font-mono cursor-pointer hover:text-purple-300 transition-colors ${activeModel === row.model ? "text-purple-400 font-bold" : "text-zinc-400"}`}
+                      title={`Filter by ${shortModel(row.model)} users`}
+                    >
+                      {row.users}
+                    </button>
+                  </td>
                   <td className="text-right py-1 font-mono text-zinc-400">
                     ${row.total_spend.toLocaleString()}
                   </td>

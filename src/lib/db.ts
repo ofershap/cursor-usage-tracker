@@ -899,6 +899,7 @@ export interface FullDashboard {
     avg_spend: number;
     total_spend: number;
     total_reqs: number;
+    emails: string[];
   }>;
   teamDailySpend: Array<{ date: string; spend_cents: number }>;
   dailySpendBreakdown: Array<{ date: string; email: string; name: string; spend_cents: number }>;
@@ -1194,7 +1195,8 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     SELECT pm.most_used_model as model, COUNT(*) as users,
       ROUND(AVG(COALESCE(us.spend_cents, 0))/100, 0) as avg_spend,
       ROUND(SUM(COALESCE(us.spend_cents, 0))/100, 0) as total_spend,
-      COALESCE(SUM(du.reqs), 0) as total_reqs
+      COALESCE(SUM(du.reqs), 0) as total_reqs,
+      GROUP_CONCAT(pm.email) as emails
     FROM primary_model pm
     LEFT JOIN user_spend us ON pm.email = us.email
     LEFT JOIN (SELECT email, SUM(agent_requests) as reqs FROM daily_usage WHERE date >= date('now', ?) GROUP BY email) du ON pm.email = du.email
@@ -1208,6 +1210,7 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     avg_spend: number;
     total_spend: number;
     total_reqs: number;
+    emails: string;
   }>;
 
   const stats: DashboardStats = {
@@ -1223,7 +1226,16 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     rankedUsers: assignBadges(rankedUsers, days).map((u, i) => ({ ...u, rank: i + 1 })),
   };
 
-  return { days, stats, modelCosts, teamDailySpend, dailySpendBreakdown };
+  return {
+    days,
+    stats,
+    modelCosts: modelCosts.map((mc) => ({
+      ...mc,
+      emails: mc.emails ? mc.emails.split(",") : [],
+    })),
+    teamDailySpend,
+    dailySpendBreakdown,
+  };
 }
 
 function isMaxModel(model: string): boolean {
@@ -1714,9 +1726,10 @@ export function getModelCostBreakdown(): Array<{
   avg_spend: number;
   total_spend: number;
   total_reqs: number;
+  emails: string[];
 }> {
   const db = getDb();
-  return db
+  const rows = db
     .prepare(
       `
     WITH user_model AS (
@@ -1731,7 +1744,8 @@ export function getModelCostBreakdown(): Array<{
     SELECT pm.most_used_model as model, COUNT(*) as users,
       ROUND(AVG(s.spend_cents)/100, 0) as avg_spend,
       ROUND(SUM(s.spend_cents)/100, 0) as total_spend,
-      COALESCE(SUM(du.reqs), 0) as total_reqs
+      COALESCE(SUM(du.reqs), 0) as total_reqs,
+      GROUP_CONCAT(pm.email) as emails
     FROM primary_model pm
     JOIN spending s ON pm.email = s.email
     LEFT JOIN (SELECT email, SUM(agent_requests) as reqs FROM daily_usage GROUP BY email) du ON pm.email = du.email
@@ -1745,7 +1759,9 @@ export function getModelCostBreakdown(): Array<{
     avg_spend: number;
     total_spend: number;
     total_reqs: number;
+    emails: string;
   }>;
+  return rows.map((r) => ({ ...r, emails: r.emails ? r.emails.split(",") : [] }));
 }
 
 export function getTeamDailySpend(): Array<{ date: string; spend_cents: number }> {
