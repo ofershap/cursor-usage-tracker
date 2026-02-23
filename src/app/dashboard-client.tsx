@@ -9,6 +9,7 @@ import { SpendTrendChart } from "@/components/charts/spend-trend-chart";
 import { MembersTable } from "@/components/dashboard/members-table";
 import Link from "next/link";
 import { shortModel } from "@/lib/format-utils";
+import { ExpandableCard } from "@/components/expandable-card";
 
 interface BillingGroupWithMembers {
   id: string;
@@ -492,31 +493,47 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
 
       {/* ── Row: Team Spend Trend + Model Cost Comparison ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <SpendTrendChart
-          data={filteredTeamDailySpend}
-          selectedDays={days}
-          avgPerDay={filteredSpendCents / 100 / (effectiveDays || 1)}
-        />
-        <ModelCostComparison data={data.modelCosts} />
+        <ExpandableCard>
+          <SpendTrendChart
+            data={filteredTeamDailySpend}
+            selectedDays={days}
+            avgPerDay={filteredSpendCents / 100 / (effectiveDays || 1)}
+          />
+        </ExpandableCard>
+        <ExpandableCard>
+          <ModelCostComparison data={data.modelCosts} />
+        </ExpandableCard>
       </div>
 
       {/* ── Charts ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <SpendBarChart data={filteredUsers.slice(0, 20)} highlightEmail={searchedUser?.email} />
-        <DailySpendChart data={dailySpendData} onNameClick={(name) => setSearch(name)} />
+        <ExpandableCard>
+          {(exp) => (
+            <SpendBarChart
+              data={filteredUsers.slice(0, 20)}
+              highlightEmail={searchedUser?.email}
+              expanded={exp}
+            />
+          )}
+        </ExpandableCard>
+        <ExpandableCard>
+          <DailySpendChart data={dailySpendData} onNameClick={(name) => setSearch(name)} />
+        </ExpandableCard>
       </div>
 
       {/* ── Table ── */}
-      <MembersTable
-        data={filteredUsers}
-        sortCol={sortCol}
-        sortAsc={sortAsc}
-        onSort={handleSort}
-        highlightEmail={searchedUser?.email}
-        timeLabel={timeLabel}
-        badgeFilter={badgeFilter}
-        onBadgeFilter={handleBadgeFilter}
-      />
+      <ExpandableCard>
+        <MembersTable
+          data={filteredUsers}
+          sortCol={sortCol}
+          sortAsc={sortAsc}
+          onSort={handleSort}
+          highlightEmail={searchedUser?.email}
+          timeLabel={timeLabel}
+          badgeFilter={badgeFilter}
+          onBadgeFilter={handleBadgeFilter}
+        />
+      </ExpandableCard>
     </div>
   );
 }

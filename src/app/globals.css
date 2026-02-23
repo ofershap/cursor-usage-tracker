@@ -27,6 +27,10 @@ label[for] {
   cursor: pointer;
 }
 
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

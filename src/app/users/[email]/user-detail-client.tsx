@@ -4,6 +4,7 @@ import Link from "next/link";
 import { SpendTrendChart } from "@/components/charts/spend-trend-chart";
 import { formatDateShort } from "@/lib/date-utils";
 import { shortModel } from "@/lib/format-utils";
+import { ExpandableCard } from "@/components/expandable-card";
 import type { Anomaly } from "@/lib/types";
 import type { UsageBadge, SpendBadge, ContextBadge, AdoptionBadge } from "@/lib/db";
 
@@ -283,360 +284,382 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <SpendTrendChart
-          data={stats.dailySpend.map((d) => {
-            const activity = stats.dailyActivity.find((a) => a.date === d.date);
-            return {
-              ...d,
-              agent_requests: activity?.agent_requests,
-              lines_added: activity?.lines_added,
-              lines_deleted: activity?.lines_deleted,
-            };
-          })}
-        />
-        <AIAdoptionCard adoption={stats.aiAdoption} />
+        <ExpandableCard>
+          <SpendTrendChart
+            data={stats.dailySpend.map((d) => {
+              const activity = stats.dailyActivity.find((a) => a.date === d.date);
+              return {
+                ...d,
+                agent_requests: activity?.agent_requests,
+                lines_added: activity?.lines_added,
+                lines_deleted: activity?.lines_deleted,
+              };
+            })}
+          />
+        </ExpandableCard>
+        <ExpandableCard>
+          <AIAdoptionCard adoption={stats.aiAdoption} />
+        </ExpandableCard>
       </div>
 
       {hasUsageEvents && (
-        <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-zinc-800">
-            <h3 className="text-xs font-medium text-zinc-400">Cost Breakdown</h3>
-          </div>
-          <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-zinc-900 z-10">
-                <tr className="border-b border-zinc-800 text-zinc-500">
-                  <th className="text-left px-4 py-2 font-medium w-[140px]">Model</th>
-                  <th className="text-right px-4 py-2 font-medium">Requests</th>
-                  <th className="text-right px-4 py-2 font-medium">$/Req</th>
-                  <th className="text-right px-4 py-2 font-medium">Total</th>
-                  <th className="text-left px-4 py-2 font-medium">Included in Plan vs Overage</th>
-                  <th className="text-right px-4 py-2 font-medium">Errors</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.usageEventsSummary.map((r) => {
-                  const totalDollars = r.total_cost_cents / 100;
-                  const planPct =
-                    r.total_cost_cents > 0 ? (r.plan_cost_cents / r.total_cost_cents) * 100 : 0;
-                  const overagePct = 100 - planPct;
-                  return (
-                    <tr key={r.model} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
-                      <td className="px-4 py-2 text-zinc-400 cursor-default" title={r.model}>
-                        {shortModel(r.model)}
-                      </td>
-                      <td className="text-right px-4 py-2 font-mono">
-                        {r.requests.toLocaleString()}
-                      </td>
-                      <td className="text-right px-4 py-2 font-mono">
-                        ${(r.avg_cost_cents / 100).toFixed(2)}
-                      </td>
-                      <td className="text-right px-4 py-2 font-mono font-bold">
-                        $
-                        {totalDollars >= 1
-                          ? Math.round(totalDollars).toLocaleString()
-                          : totalDollars.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden flex"
-                            title={`Included in plan: $${Math.round(r.plan_cost_cents / 100)} (${r.plan_reqs} reqs) · Overage: $${Math.round(r.overage_cost_cents / 100)} (${r.overage_reqs} reqs)`}
-                          >
-                            {planPct > 0 && (
-                              <div
-                                className="h-full bg-blue-500"
-                                style={{ width: `${planPct}%` }}
-                              />
-                            )}
-                            {overagePct > 0 && (
-                              <div
-                                className="h-full bg-amber-500"
-                                style={{ width: `${overagePct}%` }}
-                              />
-                            )}
+        <ExpandableCard>
+          <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-zinc-800">
+              <h3 className="text-xs font-medium text-zinc-400">Cost Breakdown</h3>
+            </div>
+            <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-zinc-900 z-10">
+                  <tr className="border-b border-zinc-800 text-zinc-500">
+                    <th className="text-left px-4 py-2 font-medium w-[140px]">Model</th>
+                    <th className="text-right px-4 py-2 font-medium">Requests</th>
+                    <th className="text-right px-4 py-2 font-medium">$/Req</th>
+                    <th className="text-right px-4 py-2 font-medium">Total</th>
+                    <th className="text-left px-4 py-2 font-medium">Included in Plan vs Overage</th>
+                    <th className="text-right px-4 py-2 font-medium">Errors</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.usageEventsSummary.map((r) => {
+                    const totalDollars = r.total_cost_cents / 100;
+                    const planPct =
+                      r.total_cost_cents > 0 ? (r.plan_cost_cents / r.total_cost_cents) * 100 : 0;
+                    const overagePct = 100 - planPct;
+                    return (
+                      <tr
+                        key={r.model}
+                        className="border-b border-zinc-800/50 hover:bg-zinc-800/30"
+                      >
+                        <td className="px-4 py-2 text-zinc-400 cursor-default" title={r.model}>
+                          {shortModel(r.model)}
+                        </td>
+                        <td className="text-right px-4 py-2 font-mono">
+                          {r.requests.toLocaleString()}
+                        </td>
+                        <td className="text-right px-4 py-2 font-mono">
+                          ${(r.avg_cost_cents / 100).toFixed(2)}
+                        </td>
+                        <td className="text-right px-4 py-2 font-mono font-bold">
+                          $
+                          {totalDollars >= 1
+                            ? Math.round(totalDollars).toLocaleString()
+                            : totalDollars.toFixed(2)}
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden flex"
+                              title={`Included in plan: $${Math.round(r.plan_cost_cents / 100)} (${r.plan_reqs} reqs) · Overage: $${Math.round(r.overage_cost_cents / 100)} (${r.overage_reqs} reqs)`}
+                            >
+                              {planPct > 0 && (
+                                <div
+                                  className="h-full bg-blue-500"
+                                  style={{ width: `${planPct}%` }}
+                                />
+                              )}
+                              {overagePct > 0 && (
+                                <div
+                                  className="h-full bg-amber-500"
+                                  style={{ width: `${overagePct}%` }}
+                                />
+                              )}
+                            </div>
+                            <span className="text-[10px] font-mono text-zinc-500 w-8 text-right shrink-0">
+                              {r.overage_reqs > 0 ? `${Math.round(overagePct)}%` : ""}
+                            </span>
                           </div>
-                          <span className="text-[10px] font-mono text-zinc-500 w-8 text-right shrink-0">
-                            {r.overage_reqs > 0 ? `${Math.round(overagePct)}%` : ""}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="text-right px-4 py-2 font-mono">
-                        {r.error_reqs > 0 ? (
-                          <span
-                            className="text-red-400/70"
-                            title={`${r.error_reqs} errored requests (not charged)`}
-                          >
-                            {r.error_reqs}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-700">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <div className="flex items-center gap-4 px-4 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-400">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" /> Included in plan
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Overage
-              </span>
+                        </td>
+                        <td className="text-right px-4 py-2 font-mono">
+                          {r.error_reqs > 0 ? (
+                            <span
+                              className="text-red-400/70"
+                              title={`${r.error_reqs} errored requests (not charged)`}
+                            >
+                              {r.error_reqs}
+                            </span>
+                          ) : (
+                            <span className="text-zinc-700">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div className="flex items-center gap-4 px-4 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-400">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" /> Included in
+                  plan
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Overage
+                </span>
+              </div>
             </div>
           </div>
-        </div>
+        </ExpandableCard>
       )}
 
       {(stats.mcpSummary.length > 0 || stats.commandsSummary.length > 0) && (
-        <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-zinc-800">
-            <h3 className="text-xs font-medium text-zinc-400">Tools & Features</h3>
+        <ExpandableCard>
+          <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-zinc-800">
+              <h3 className="text-xs font-medium text-zinc-400">Tools & Features</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-0 md:divide-x md:divide-zinc-800">
+              {stats.mcpSummary.length > 0 && (
+                <div className="p-4">
+                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
+                    MCP Tools
+                  </div>
+                  <div className="space-y-1.5">
+                    {stats.mcpSummary.slice(0, 10).map((t) => (
+                      <div
+                        key={`${t.tool_name}-${t.server_name}`}
+                        className="flex items-center justify-between text-xs"
+                      >
+                        <span className="text-zinc-300 truncate mr-2">
+                          {t.tool_name}
+                          <span className="text-zinc-600 ml-1">({t.server_name})</span>
+                        </span>
+                        <span className="font-mono text-zinc-500 shrink-0">
+                          {t.total_usage.toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {stats.commandsSummary.length > 0 && (
+                <div className="p-4">
+                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
+                    Commands
+                  </div>
+                  <div className="space-y-1.5">
+                    {stats.commandsSummary.slice(0, 10).map((c, i) => (
+                      <div
+                        key={`${c.command_name}-${i}`}
+                        className="flex items-center justify-between text-xs"
+                      >
+                        <span className="text-zinc-300">{c.command_name}</span>
+                        <span className="font-mono text-zinc-500">
+                          {c.total_usage.toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-0 md:divide-x md:divide-zinc-800">
-            {stats.mcpSummary.length > 0 && (
-              <div className="p-4">
-                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
-                  MCP Tools
-                </div>
-                <div className="space-y-1.5">
-                  {stats.mcpSummary.slice(0, 10).map((t) => (
-                    <div
-                      key={`${t.tool_name}-${t.server_name}`}
-                      className="flex items-center justify-between text-xs"
-                    >
-                      <span className="text-zinc-300 truncate mr-2">
-                        {t.tool_name}
-                        <span className="text-zinc-600 ml-1">({t.server_name})</span>
-                      </span>
-                      <span className="font-mono text-zinc-500 shrink-0">
-                        {t.total_usage.toLocaleString()}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {stats.commandsSummary.length > 0 && (
-              <div className="p-4">
-                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
-                  Commands
-                </div>
-                <div className="space-y-1.5">
-                  {stats.commandsSummary.slice(0, 10).map((c, i) => (
-                    <div
-                      key={`${c.command_name}-${i}`}
-                      className="flex items-center justify-between text-xs"
-                    >
-                      <span className="text-zinc-300">{c.command_name}</span>
-                      <span className="font-mono text-zinc-500">
-                        {c.total_usage.toLocaleString()}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        </ExpandableCard>
       )}
 
-      {stats.contextMetrics && <ContextEfficiencyCard metrics={stats.contextMetrics} />}
+      {stats.contextMetrics && (
+        <ExpandableCard>
+          <ContextEfficiencyCard metrics={stats.contextMetrics} />
+        </ExpandableCard>
+      )}
 
       {stats.modelBreakdown.length > 0 && (
-        <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-zinc-800">
-            <h3 className="text-xs font-medium text-zinc-400">Model Preferences</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-zinc-800 text-zinc-500">
-                  <th className="text-left px-4 py-2 font-medium">Model</th>
-                  <th className="text-right px-4 py-2 font-medium">Days Used</th>
-                  <th className="text-right px-4 py-2 font-medium">Requests</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.modelBreakdown.map((m) => (
-                  <tr key={m.model} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
-                    <td className="px-4 py-1.5 text-zinc-400 cursor-default" title={m.model}>
-                      {shortModel(m.model)}
-                    </td>
-                    <td className="text-right px-4 py-1.5 font-mono">{m.days_used}</td>
-                    <td className="text-right px-4 py-1.5 font-mono">
-                      {m.total_requests.toLocaleString()}
-                    </td>
+        <ExpandableCard>
+          <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-zinc-800">
+              <h3 className="text-xs font-medium text-zinc-400">Model Preferences</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-zinc-800 text-zinc-500">
+                    <th className="text-left px-4 py-2 font-medium">Model</th>
+                    <th className="text-right px-4 py-2 font-medium">Days Used</th>
+                    <th className="text-right px-4 py-2 font-medium">Requests</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {stats.modelBreakdown.map((m) => (
+                    <tr key={m.model} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                      <td className="px-4 py-1.5 text-zinc-400 cursor-default" title={m.model}>
+                        {shortModel(m.model)}
+                      </td>
+                      <td className="text-right px-4 py-1.5 font-mono">{m.days_used}</td>
+                      <td className="text-right px-4 py-1.5 font-mono">
+                        {m.total_requests.toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        </ExpandableCard>
       )}
 
-      <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-zinc-800">
-          <h3 className="text-xs font-medium text-zinc-400">Daily Activity & Spend</h3>
-        </div>
-        <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
-          <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-zinc-900 z-10">
-              <tr className="border-b border-zinc-800 text-zinc-500">
-                <th className="text-left px-4 py-2 font-medium">Date</th>
-                <th className="text-right px-4 py-2 font-medium">Model</th>
-                <th
-                  className="text-right px-4 py-2 font-medium cursor-default"
-                  title="Agent mode requests (primary AI interaction)"
-                >
-                  Requests
-                </th>
-                <th className="text-right px-4 py-2 font-medium">Spend</th>
-                <th
-                  className="text-right px-4 py-2 font-medium cursor-default"
-                  title="Total lines added/deleted in editor — includes AI, manual typing, paste, refactoring"
-                >
-                  Lines +/-
-                </th>
-                <th
-                  className="text-right px-4 py-2 font-medium cursor-default"
-                  title="Agent diffs accepted by user"
-                >
-                  Accepts
-                </th>
-                <th
-                  className="text-right px-4 py-2 font-medium cursor-default"
-                  title="Tab completions accepted"
-                >
-                  Tabs
-                </th>
-                <th className="text-right px-4 py-2 font-medium">Version</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mergedDailyData.map((d) => (
-                <tr
-                  key={d.date}
-                  className={`border-b border-zinc-800/50 hover:bg-zinc-800/30 ${d.isSpike ? "bg-red-500/5" : ""}`}
-                >
-                  <td className="px-4 py-1.5 text-zinc-400 whitespace-nowrap">
-                    {formatDateShort(d.date)}
-                  </td>
-                  <td
-                    className="text-right px-4 py-1.5 text-zinc-500 cursor-default"
-                    title={d.most_used_model}
-                  >
-                    {shortModel(d.most_used_model)}
-                  </td>
-                  <td className="text-right px-4 py-1.5 font-mono">
-                    {d.agent_requests > 0 ? (
-                      <span className="text-zinc-300">
-                        {d.usage_based_reqs > 0 && (
-                          <span
-                            className="mr-1 text-amber-400/80 text-[10px] cursor-default"
-                            title={`${d.usage_based_reqs} of these were usage-based (beyond plan)`}
-                          >
-                            ${"\u2022"}
-                          </span>
-                        )}
-                        {d.agent_requests}
-                      </span>
-                    ) : (
-                      <span className="text-zinc-700">—</span>
-                    )}
-                  </td>
-                  <td className="text-right px-4 py-1.5 font-mono">
-                    {d.spend > 0 ? (
-                      <span className={d.isSpike ? "text-red-400 font-bold" : "text-amber-400"}>
-                        {d.spend < 1 ? d.spend.toFixed(2) : Math.round(d.spend)}$
-                      </span>
-                    ) : (
-                      <span className="text-zinc-700">—</span>
-                    )}
-                  </td>
-                  <td className="text-right px-4 py-1.5 font-mono">
-                    {d.lines_added > 0 || d.lines_deleted > 0 ? (
-                      <>
-                        <span className="text-green-400">+{d.lines_added}</span>
-                        {" / "}
-                        <span className="text-red-400">-{d.lines_deleted}</span>
-                      </>
-                    ) : (
-                      <span className="text-zinc-700">—</span>
-                    )}
-                  </td>
-                  <td className="text-right px-4 py-1.5 font-mono">
-                    {d.total_accepts > 0 ? (
-                      d.total_accepts
-                    ) : (
-                      <span className="text-zinc-700">—</span>
-                    )}
-                  </td>
-                  <td className="text-right px-4 py-1.5 font-mono">
-                    {d.tabs_accepted > 0 ? (
-                      d.tabs_accepted
-                    ) : (
-                      <span className="text-zinc-700">—</span>
-                    )}
-                  </td>
-                  <td className="text-right px-4 py-1.5 text-zinc-600">{d.client_version}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {stats.anomalies.length > 0 && (
+      <ExpandableCard>
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
           <div className="px-4 py-2.5 border-b border-zinc-800">
-            <h3 className="text-xs font-medium text-zinc-400">Anomaly History</h3>
+            <h3 className="text-xs font-medium text-zinc-400">Daily Activity & Spend</h3>
           </div>
-          <div className="overflow-x-auto max-h-[250px] overflow-y-auto">
+          <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-zinc-900 z-10">
                 <tr className="border-b border-zinc-800 text-zinc-500">
-                  <th className="text-left px-4 py-2 font-medium">Detected</th>
-                  <th className="text-left px-4 py-2 font-medium">Type</th>
-                  <th className="text-left px-4 py-2 font-medium">Severity</th>
-                  <th className="text-left px-4 py-2 font-medium">Message</th>
-                  <th className="text-left px-4 py-2 font-medium">Status</th>
+                  <th className="text-left px-4 py-2 font-medium">Date</th>
+                  <th className="text-right px-4 py-2 font-medium">Model</th>
+                  <th
+                    className="text-right px-4 py-2 font-medium cursor-default"
+                    title="Agent mode requests (primary AI interaction)"
+                  >
+                    Requests
+                  </th>
+                  <th className="text-right px-4 py-2 font-medium">Spend</th>
+                  <th
+                    className="text-right px-4 py-2 font-medium cursor-default"
+                    title="Total lines added/deleted in editor — includes AI, manual typing, paste, refactoring"
+                  >
+                    Lines +/-
+                  </th>
+                  <th
+                    className="text-right px-4 py-2 font-medium cursor-default"
+                    title="Agent diffs accepted by user"
+                  >
+                    Accepts
+                  </th>
+                  <th
+                    className="text-right px-4 py-2 font-medium cursor-default"
+                    title="Tab completions accepted"
+                  >
+                    Tabs
+                  </th>
+                  <th className="text-right px-4 py-2 font-medium">Version</th>
                 </tr>
               </thead>
               <tbody>
-                {stats.anomalies.map((a) => (
-                  <tr key={a.id} className="border-b border-zinc-800/50">
+                {mergedDailyData.map((d) => (
+                  <tr
+                    key={d.date}
+                    className={`border-b border-zinc-800/50 hover:bg-zinc-800/30 ${d.isSpike ? "bg-red-500/5" : ""}`}
+                  >
                     <td className="px-4 py-1.5 text-zinc-400 whitespace-nowrap">
-                      {new Date(a.detectedAt).toLocaleDateString()}
+                      {formatDateShort(d.date)}
                     </td>
-                    <td className="px-4 py-1.5">
-                      <span className="px-1.5 py-0.5 bg-zinc-800 rounded text-[10px]">
-                        {a.type}
-                      </span>
+                    <td
+                      className="text-right px-4 py-1.5 text-zinc-500 cursor-default"
+                      title={d.most_used_model}
+                    >
+                      {shortModel(d.most_used_model)}
                     </td>
-                    <td className="px-4 py-1.5">
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] ${a.severity === "critical" ? "bg-red-500/20 text-red-400" : a.severity === "warning" ? "bg-yellow-500/20 text-yellow-400" : "bg-blue-500/20 text-blue-400"}`}
-                      >
-                        {a.severity}
-                      </span>
-                    </td>
-                    <td className="px-4 py-1.5 max-w-md truncate">{a.message}</td>
-                    <td className="px-4 py-1.5">
-                      {a.resolvedAt ? (
-                        <span className="text-green-400 text-[10px]">Resolved</span>
+                    <td className="text-right px-4 py-1.5 font-mono">
+                      {d.agent_requests > 0 ? (
+                        <span className="text-zinc-300">
+                          {d.usage_based_reqs > 0 && (
+                            <span
+                              className="mr-1 text-amber-400/80 text-[10px] cursor-default"
+                              title={`${d.usage_based_reqs} of these were usage-based (beyond plan)`}
+                            >
+                              ${"\u2022"}
+                            </span>
+                          )}
+                          {d.agent_requests}
+                        </span>
                       ) : (
-                        <span className="text-red-400 text-[10px]">Open</span>
+                        <span className="text-zinc-700">—</span>
                       )}
                     </td>
+                    <td className="text-right px-4 py-1.5 font-mono">
+                      {d.spend > 0 ? (
+                        <span className={d.isSpike ? "text-red-400 font-bold" : "text-amber-400"}>
+                          {d.spend < 1 ? d.spend.toFixed(2) : Math.round(d.spend)}$
+                        </span>
+                      ) : (
+                        <span className="text-zinc-700">—</span>
+                      )}
+                    </td>
+                    <td className="text-right px-4 py-1.5 font-mono">
+                      {d.lines_added > 0 || d.lines_deleted > 0 ? (
+                        <>
+                          <span className="text-green-400">+{d.lines_added}</span>
+                          {" / "}
+                          <span className="text-red-400">-{d.lines_deleted}</span>
+                        </>
+                      ) : (
+                        <span className="text-zinc-700">—</span>
+                      )}
+                    </td>
+                    <td className="text-right px-4 py-1.5 font-mono">
+                      {d.total_accepts > 0 ? (
+                        d.total_accepts
+                      ) : (
+                        <span className="text-zinc-700">—</span>
+                      )}
+                    </td>
+                    <td className="text-right px-4 py-1.5 font-mono">
+                      {d.tabs_accepted > 0 ? (
+                        d.tabs_accepted
+                      ) : (
+                        <span className="text-zinc-700">—</span>
+                      )}
+                    </td>
+                    <td className="text-right px-4 py-1.5 text-zinc-600">{d.client_version}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </div>
+      </ExpandableCard>
+
+      {stats.anomalies.length > 0 && (
+        <ExpandableCard>
+          <div className="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-zinc-800">
+              <h3 className="text-xs font-medium text-zinc-400">Anomaly History</h3>
+            </div>
+            <div className="overflow-x-auto max-h-[250px] overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-zinc-900 z-10">
+                  <tr className="border-b border-zinc-800 text-zinc-500">
+                    <th className="text-left px-4 py-2 font-medium">Detected</th>
+                    <th className="text-left px-4 py-2 font-medium">Type</th>
+                    <th className="text-left px-4 py-2 font-medium">Severity</th>
+                    <th className="text-left px-4 py-2 font-medium">Message</th>
+                    <th className="text-left px-4 py-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.anomalies.map((a) => (
+                    <tr key={a.id} className="border-b border-zinc-800/50">
+                      <td className="px-4 py-1.5 text-zinc-400 whitespace-nowrap">
+                        {new Date(a.detectedAt).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-1.5">
+                        <span className="px-1.5 py-0.5 bg-zinc-800 rounded text-[10px]">
+                          {a.type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-1.5">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] ${a.severity === "critical" ? "bg-red-500/20 text-red-400" : a.severity === "warning" ? "bg-yellow-500/20 text-yellow-400" : "bg-blue-500/20 text-blue-400"}`}
+                        >
+                          {a.severity}
+                        </span>
+                      </td>
+                      <td className="px-4 py-1.5 max-w-md truncate">{a.message}</td>
+                      <td className="px-4 py-1.5">
+                        {a.resolvedAt ? (
+                          <span className="text-green-400 text-[10px]">Resolved</span>
+                        ) : (
+                          <span className="text-red-400 text-[10px]">Open</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </ExpandableCard>
       )}
     </div>
   );

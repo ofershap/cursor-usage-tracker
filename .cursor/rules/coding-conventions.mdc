@@ -39,6 +39,8 @@ import type { Anomaly } from "@/lib/types";
 - Use Tailwind CSS with zinc color palette (dark theme)
 - No shadcn/ui installed — components are hand-rolled
 - Model names displayed via `shortModel()` from `src/lib/format-utils.ts` with full name in tooltip
+- Self-contained components: components like `upgrade-banner.tsx` are designed with minimal footprint — single file, own modal/overlay logic baked in, easy to add/remove with 1-2 line diffs in consuming files. Do NOT extract shared modals or abstractions from them; keep them isolated.
+- `ExpandableCard` (`src/components/expandable-card.tsx`): wraps any card to add a fullscreen expand button. Wrap the outer card div, don't restructure the card internals.
 
 ## Anomaly Detection
 

@@ -121,6 +121,7 @@ interface InsightsData {
 }
 
 import { formatDateTick, formatDateLabel } from "@/lib/date-utils";
+import { ExpandableCard } from "@/components/expandable-card";
 
 interface GroupInfo {
   id: string;
@@ -334,106 +335,114 @@ export function InsightsClient({
 
       {/* Plan Exhaustion (compact) */}
       {data.planExhaustion.summary.users_exhausted > 0 && (
-        <PlanExhaustionSection data={data.planExhaustion} />
+        <ExpandableCard>
+          {(exp) => <PlanExhaustionSection data={data.planExhaustion} expanded={exp} />}
+        </ExpandableCard>
       )}
 
       {/* Model Cost vs Value */}
       {data.modelEfficiency.length > 0 && (
-        <ModelEfficiencySection
-          data={data.modelEfficiency}
-          days={days}
-          groupName={isFiltered ? selectedGroupName : undefined}
-        />
+        <ExpandableCard>
+          <ModelEfficiencySection
+            data={data.modelEfficiency}
+            days={days}
+            groupName={isFiltered ? selectedGroupName : undefined}
+          />
+        </ExpandableCard>
       )}
 
       {/* Adoption Row: Commands + MCP Tools (filtered) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <ChartCard
-          title={
-            isFiltered ? `Commands Adoption · ${selectedGroupName}` : "Commands Adoption (Top 20)"
-          }
-        >
-          <div className="overflow-y-auto max-h-[200px]">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-zinc-900">
-                <tr className="text-zinc-500 border-b border-zinc-800">
-                  <th className="text-left py-1 font-medium">Command</th>
-                  <th className="text-right py-1 font-medium">Total Usage</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mergedCommands.slice(0, 20).map((row, i) => (
-                  <tr
-                    key={`${row.command_name}-${i}`}
-                    className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
-                  >
-                    <td className="py-1 text-zinc-300 font-mono">{row.command_name}</td>
-                    <td className="text-right py-1">
-                      <div className="flex items-center justify-end gap-1">
-                        <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${Math.min(
-                                (row.total_usage / (mergedCommands[0]?.total_usage || 1)) * 100,
-                                100,
-                              )}%`,
-                              backgroundColor: COLORS[i % COLORS.length],
-                            }}
-                          />
-                        </div>
-                        <span className="font-mono">{fmt(row.total_usage)}</span>
-                      </div>
-                    </td>
+        <ExpandableCard>
+          <ChartCard
+            title={
+              isFiltered ? `Commands Adoption · ${selectedGroupName}` : "Commands Adoption (Top 20)"
+            }
+          >
+            <div className="overflow-y-auto max-h-[200px]">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-zinc-900">
+                  <tr className="text-zinc-500 border-b border-zinc-800">
+                    <th className="text-left py-1 font-medium">Command</th>
+                    <th className="text-right py-1 font-medium">Total Usage</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </ChartCard>
+                </thead>
+                <tbody>
+                  {mergedCommands.slice(0, 20).map((row, i) => (
+                    <tr
+                      key={`${row.command_name}-${i}`}
+                      className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
+                    >
+                      <td className="py-1 text-zinc-300 font-mono">{row.command_name}</td>
+                      <td className="text-right py-1">
+                        <div className="flex items-center justify-end gap-1">
+                          <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${Math.min(
+                                  (row.total_usage / (mergedCommands[0]?.total_usage || 1)) * 100,
+                                  100,
+                                )}%`,
+                                backgroundColor: COLORS[i % COLORS.length],
+                              }}
+                            />
+                          </div>
+                          <span className="font-mono">{fmt(row.total_usage)}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </ChartCard>
+        </ExpandableCard>
 
-        <ChartCard
-          title={
-            isFiltered ? `MCP Tool Adoption · ${selectedGroupName}` : "MCP Tool Adoption (Top 20)"
-          }
-        >
-          <div className="overflow-y-auto max-h-[200px]">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-zinc-900">
-                <tr className="text-zinc-500 border-b border-zinc-800">
-                  <th className="text-left py-1 font-medium">Server</th>
-                  <th className="text-left py-1 font-medium">Tool</th>
-                  <th className="text-right py-1 font-medium">Calls</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.mcp.map((row, i) => (
-                  <tr
-                    key={`${row.server_name}-${row.tool_name}`}
-                    className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
-                  >
-                    <td className="py-1 text-zinc-400 font-mono">{row.server_name}</td>
-                    <td className="py-1 text-zinc-300 font-mono">{row.tool_name}</td>
-                    <td className="text-right py-1">
-                      <div className="flex items-center justify-end gap-1">
-                        <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${Math.min((row.total_usage / (data.mcp[0]?.total_usage || 1)) * 100, 100)}%`,
-                              backgroundColor: COLORS[i % COLORS.length],
-                            }}
-                          />
-                        </div>
-                        <span className="font-mono">{fmt(row.total_usage)}</span>
-                      </div>
-                    </td>
+        <ExpandableCard>
+          <ChartCard
+            title={
+              isFiltered ? `MCP Tool Adoption · ${selectedGroupName}` : "MCP Tool Adoption (Top 20)"
+            }
+          >
+            <div className="overflow-y-auto max-h-[200px]">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-zinc-900">
+                  <tr className="text-zinc-500 border-b border-zinc-800">
+                    <th className="text-left py-1 font-medium">Server</th>
+                    <th className="text-left py-1 font-medium">Tool</th>
+                    <th className="text-right py-1 font-medium">Calls</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </ChartCard>
+                </thead>
+                <tbody>
+                  {data.mcp.map((row, i) => (
+                    <tr
+                      key={`${row.server_name}-${row.tool_name}`}
+                      className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
+                    >
+                      <td className="py-1 text-zinc-400 font-mono">{row.server_name}</td>
+                      <td className="py-1 text-zinc-300 font-mono">{row.tool_name}</td>
+                      <td className="text-right py-1">
+                        <div className="flex items-center justify-end gap-1">
+                          <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${Math.min((row.total_usage / (data.mcp[0]?.total_usage || 1)) * 100, 100)}%`,
+                                backgroundColor: COLORS[i % COLORS.length],
+                              }}
+                            />
+                          </div>
+                          <span className="font-mono">{fmt(row.total_usage)}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </ChartCard>
+        </ExpandableCard>
       </div>
 
       {/* Divider: team-wide section */}
@@ -449,194 +458,207 @@ export function InsightsClient({
 
       {/* Charts Row: DAU + Model Adoption */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <ChartCard title="Daily Active Users - by Usage Type">
-          <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={data.dau}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-              <XAxis
-                dataKey="date"
-                tickFormatter={shortDate}
-                tick={{ fontSize: 10, fill: "#71717a" }}
-              />
-              <YAxis tick={{ fontSize: 10, fill: "#71717a" }} width={30} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#18181b",
-                  border: "1px solid #3f3f46",
-                  borderRadius: "6px",
-                  fontSize: "11px",
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="dau"
-                stroke="#3b82f6"
-                fill="#3b82f6"
-                fillOpacity={0.15}
-                name="DAU"
-              />
-              <Area
-                type="monotone"
-                dataKey="cloud_agent_dau"
-                stroke="#8b5cf6"
-                fill="#8b5cf6"
-                fillOpacity={0.1}
-                name="Cloud Agent"
-              />
-              <Area
-                type="monotone"
-                dataKey="cli_dau"
-                stroke="#06b6d4"
-                fill="#06b6d4"
-                fillOpacity={0.1}
-                name="CLI"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Model Adoption Share (%)">
-          <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={modelShareData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-              <XAxis
-                dataKey="date"
-                tickFormatter={shortDate}
-                tick={{ fontSize: 10, fill: "#71717a" }}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: "#71717a" }}
-                width={30}
-                domain={[0, 100]}
-                tickFormatter={(v: number) => `${v}%`}
-              />
-              <Tooltip
-                content={({ active, payload, label }) => {
-                  if (!active || !payload?.length) return null;
-                  const items = payload
-                    .filter((p) => (p.value as number) > 0)
-                    .sort((a, b) => (b.value as number) - (a.value as number));
-                  return (
-                    <div className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs shadow-lg">
-                      <div className="text-zinc-400 font-medium mb-1">
-                        {formatDateLabel(String(label))}
-                      </div>
-                      {items.map((item) => (
-                        <div
-                          key={item.dataKey as string}
-                          className="flex items-center gap-2 py-0.5"
-                        >
-                          <span
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: item.color }}
-                          />
-                          <span className="text-zinc-300">{item.dataKey as string}</span>
-                          <span className="ml-auto font-mono text-zinc-100">{item.value}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                }}
-              />
-              {top5Models.map((model, i) => (
-                <Area
-                  key={model}
-                  type="monotone"
-                  dataKey={model}
-                  stackId="1"
-                  stroke={COLORS[i % COLORS.length] ?? "#71717a"}
-                  fill={COLORS[i % COLORS.length] ?? "#71717a"}
-                  fillOpacity={0.4}
-                  name={shortModel(model)}
+        <ExpandableCard>
+          <ChartCard title="Daily Active Users - by Usage Type">
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={data.dau}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={shortDate}
+                  tick={{ fontSize: 10, fill: "#71717a" }}
                 />
-              ))}
-              <Legend wrapperStyle={{ fontSize: "10px" }} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </ChartCard>
+                <YAxis tick={{ fontSize: 10, fill: "#71717a" }} width={30} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#18181b",
+                    border: "1px solid #3f3f46",
+                    borderRadius: "6px",
+                    fontSize: "11px",
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="dau"
+                  stroke="#3b82f6"
+                  fill="#3b82f6"
+                  fillOpacity={0.15}
+                  name="DAU"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="cloud_agent_dau"
+                  stroke="#8b5cf6"
+                  fill="#8b5cf6"
+                  fillOpacity={0.1}
+                  name="Cloud Agent"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="cli_dau"
+                  stroke="#06b6d4"
+                  fill="#06b6d4"
+                  fillOpacity={0.1}
+                  name="CLI"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </ExpandableCard>
+
+        <ExpandableCard>
+          <ChartCard title="Model Adoption Share (%)">
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={modelShareData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={shortDate}
+                  tick={{ fontSize: 10, fill: "#71717a" }}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "#71717a" }}
+                  width={30}
+                  domain={[0, 100]}
+                  tickFormatter={(v: number) => `${v}%`}
+                />
+                <Tooltip
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null;
+                    const items = payload
+                      .filter((p) => (p.value as number) > 0)
+                      .sort((a, b) => (b.value as number) - (a.value as number));
+                    return (
+                      <div className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs shadow-lg">
+                        <div className="text-zinc-400 font-medium mb-1">
+                          {formatDateLabel(String(label))}
+                        </div>
+                        {items.map((item) => (
+                          <div
+                            key={item.dataKey as string}
+                            className="flex items-center gap-2 py-0.5"
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{ backgroundColor: item.color }}
+                            />
+                            <span className="text-zinc-300">{item.dataKey as string}</span>
+                            <span className="ml-auto font-mono text-zinc-100">{item.value}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }}
+                />
+                {top5Models.map((model, i) => (
+                  <Area
+                    key={model}
+                    type="monotone"
+                    dataKey={model}
+                    stackId="1"
+                    stroke={COLORS[i % COLORS.length] ?? "#71717a"}
+                    fill={COLORS[i % COLORS.length] ?? "#71717a"}
+                    fillOpacity={0.4}
+                    name={shortModel(model)}
+                  />
+                ))}
+                <Legend wrapperStyle={{ fontSize: "10px" }} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </ExpandableCard>
       </div>
 
       {/* Tables Row: Model Breakdown + File Extensions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <ChartCard title={`Model Usage Breakdown (${days}d)`}>
-          <div className="overflow-y-auto max-h-[200px]">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-zinc-900">
-                <tr className="text-zinc-500 border-b border-zinc-800">
-                  <th className="text-left py-1 font-medium">Model</th>
-                  <th className="text-right py-1 font-medium">Messages</th>
-                  <th className="text-right py-1 font-medium">Users</th>
-                  <th className="text-right py-1 font-medium">% of Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.modelSummary.map((row) => {
-                  const pct = totalMessages > 0 ? (row.total_messages / totalMessages) * 100 : 0;
-                  return (
-                    <tr
-                      key={row.model}
-                      className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
-                    >
-                      <td className="py-1 text-zinc-300 font-mono cursor-default" title={row.model}>
-                        {shortModel(row.model)}
-                      </td>
-                      <td className="text-right py-1 font-mono">{fmt(row.total_messages)}</td>
-                      <td className="text-right py-1 text-zinc-400">{row.total_users}</td>
-                      <td className="text-right py-1">
-                        <div className="flex items-center justify-end gap-1">
-                          <div className="w-12 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-blue-500 rounded-full"
-                              style={{ width: `${Math.min(pct, 100)}%` }}
-                            />
+        <ExpandableCard>
+          <ChartCard title={`Model Usage Breakdown (${days}d)`}>
+            <div className="overflow-y-auto max-h-[200px]">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-zinc-900">
+                  <tr className="text-zinc-500 border-b border-zinc-800">
+                    <th className="text-left py-1 font-medium">Model</th>
+                    <th className="text-right py-1 font-medium">Messages</th>
+                    <th className="text-right py-1 font-medium">Users</th>
+                    <th className="text-right py-1 font-medium">% of Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.modelSummary.map((row) => {
+                    const pct = totalMessages > 0 ? (row.total_messages / totalMessages) * 100 : 0;
+                    return (
+                      <tr
+                        key={row.model}
+                        className="border-b border-zinc-800/30 hover:bg-zinc-800/30"
+                      >
+                        <td
+                          className="py-1 text-zinc-300 font-mono cursor-default"
+                          title={row.model}
+                        >
+                          {shortModel(row.model)}
+                        </td>
+                        <td className="text-right py-1 font-mono">{fmt(row.total_messages)}</td>
+                        <td className="text-right py-1 text-zinc-400">{row.total_users}</td>
+                        <td className="text-right py-1">
+                          <div className="flex items-center justify-end gap-1">
+                            <div className="w-12 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-blue-500 rounded-full"
+                                style={{ width: `${Math.min(pct, 100)}%` }}
+                              />
+                            </div>
+                            <span className="text-zinc-500 w-8 text-right">{pct.toFixed(0)}%</span>
                           </div>
-                          <span className="text-zinc-500 w-8 text-right">{pct.toFixed(0)}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </ChartCard>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </ChartCard>
+        </ExpandableCard>
 
-        <ChartCard title="Top File Extensions (by AI Lines Accepted)">
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={data.fileExtensions.slice(0, 8)} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-              <XAxis type="number" tick={{ fontSize: 10, fill: "#71717a" }} tickFormatter={fmt} />
-              <YAxis
-                type="category"
-                dataKey="extension"
-                tick={{ fontSize: 10, fill: "#71717a" }}
-                width={35}
-                tickFormatter={(v: string) => `.${v}`}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#18181b",
-                  border: "1px solid #3f3f46",
-                  borderRadius: "6px",
-                  fontSize: "11px",
-                }}
-                formatter={((v: number) => [fmt(v ?? 0), "Lines"]) as never}
-              />
-              <Bar dataKey="total_lines_accepted" name="Lines Accepted" radius={[0, 4, 4, 0]}>
-                {data.fileExtensions.slice(0, 8).map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
+        <ExpandableCard>
+          <ChartCard title="Top File Extensions (by AI Lines Accepted)">
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={data.fileExtensions.slice(0, 8)} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                <XAxis type="number" tick={{ fontSize: 10, fill: "#71717a" }} tickFormatter={fmt} />
+                <YAxis
+                  type="category"
+                  dataKey="extension"
+                  tick={{ fontSize: 10, fill: "#71717a" }}
+                  width={35}
+                  tickFormatter={(v: string) => `.${v}`}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#18181b",
+                    border: "1px solid #3f3f46",
+                    borderRadius: "6px",
+                    fontSize: "11px",
+                  }}
+                  formatter={((v: number) => [fmt(v ?? 0), "Lines"]) as never}
+                />
+                <Bar dataKey="total_lines_accepted" name="Lines Accepted" radius={[0, 4, 4, 0]}>
+                  {data.fileExtensions.slice(0, 8).map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </ExpandableCard>
       </div>
 
       {/* Client Versions - compact */}
-      <ClientVersionsSection
-        clientVersions={data.clientVersions}
-        versionUsers={data.versionUsers}
-      />
+      <ExpandableCard>
+        <ClientVersionsSection
+          clientVersions={data.clientVersions}
+          versionUsers={data.versionUsers}
+        />
+      </ExpandableCard>
     </div>
   );
 }
@@ -761,8 +783,15 @@ function ClientVersionsSection({
   );
 }
 
-function PlanExhaustionSection({ data }: { data: PlanExhaustionData }) {
+function PlanExhaustionSection({
+  data,
+  expanded,
+}: {
+  data: PlanExhaustionData;
+  expanded?: boolean;
+}) {
   const [showUsers, setShowUsers] = useState(false);
+  const usersVisible = showUsers || !!expanded;
   const { summary, users } = data;
   const cycleDay = new Date().getDate();
 
@@ -794,7 +823,7 @@ function PlanExhaustionSection({ data }: { data: PlanExhaustionData }) {
           className="flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
         >
           <svg
-            className={`w-3 h-3 transition-transform ${showUsers ? "rotate-90" : ""}`}
+            className={`w-3 h-3 transition-transform ${usersVisible ? "rotate-90" : ""}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -802,7 +831,7 @@ function PlanExhaustionSection({ data }: { data: PlanExhaustionData }) {
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
           </svg>
-          {showUsers ? "Hide" : "Show"} users
+          {usersVisible ? "Hide" : "Show"} users
         </button>
       </div>
 
@@ -838,7 +867,7 @@ function PlanExhaustionSection({ data }: { data: PlanExhaustionData }) {
         ))}
       </div>
 
-      {showUsers && (
+      {usersVisible && (
         <div className="overflow-y-auto max-h-[250px] border-t border-zinc-800 pt-2">
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-zinc-900">
