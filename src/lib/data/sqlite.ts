@@ -525,16 +525,19 @@ export function upsertSpending(members: MemberSpend[], cycleStart: string): void
 
   const tx = db.transaction(() => {
     for (const m of members) {
+      // Defensive defaults guard against future API drift: any of these going
+      // missing previously crashed the collector with a NOT NULL violation
+      // (see GH issue #19).
       stmt.run(
         m.email,
-        m.userId,
-        m.name,
+        m.userId ?? null,
+        m.name ?? null,
         cycleStart,
-        m.spendCents,
-        m.includedSpendCents,
-        m.fastPremiumRequests,
-        m.monthlyLimitDollars,
-        m.hardLimitOverrideDollars,
+        m.spendCents ?? 0,
+        m.includedSpendCents ?? 0,
+        m.fastPremiumRequests ?? 0,
+        m.monthlyLimitDollars ?? null,
+        m.hardLimitOverrideDollars ?? 0,
       );
     }
   });
