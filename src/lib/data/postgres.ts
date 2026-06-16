@@ -1,0 +1,3187 @@
+import { ensurePostgresSchema, PgDatabase } from "./postgres-bridge";
+import type {
+  TeamMember,
+  DailyUsage,
+  MemberSpend,
+  Anomaly,
+  Incident,
+  DetectionConfig,
+  GroupMemberSpend,
+  FilteredUsageEvent,
+  AICodeCommit,
+  AnalyticsDAUEntry,
+  AnalyticsModelUsageEntry,
+  AnalyticsAgentEditsEntry,
+  AnalyticsTabsEntry,
+  AnalyticsMCPEntry,
+  AnalyticsFileExtensionsEntry,
+  AnalyticsClientVersionsEntry,
+  AnalyticsCommandsEntry,
+  AnalyticsPlansEntry,
+} from "../types";
+import { DEFAULT_CONFIG } from "../types";
+import type {
+  UsageBadge,
+  SpendBadge,
+  ContextBadge,
+  AdoptionBadge,
+  RankedUser,
+  DashboardStats,
+  FullDashboard,
+  ModelEfficiency,
+  UserContextMetrics,
+  CycleSummaryData,
+} from "./types";
+
+let dbInstance: PgDatabase | null = null;
+
+export function getDb(): PgDatabase {
+  if (!dbInstance) {
+    ensurePostgresSchema();
+    dbInstance = new PgDatabase();
+  }
+  return dbInstance;
+}
+
+function cycleBillingAnchor(db: PgDatabase): {
+  cycleStart: string;
+  cycleStartMs: number;
+  teamBilledCents: number;
+} | null {
+  const row = db.prepare("SELECT MAX(cycle_start) as cs FROM spending").get() as { cs: string | null };
+  if (!row?.cs) return null;
+  const cycleStart = row.cs;
+  const cycleStartMs = new Date(`${cycleStart}T12:00:00.000Z`).getTime();
+  const t = db
+    .prepare("SELECT COALESCE(SUM(spend_cents), 0) as t FROM spending WHERE cycle_start = ?")
+    .get(cycleStart) as { t: number };
+  return { cycleStart, cycleStartMs, teamBilledCents: t.t };
+}
+
+export function setMetadata(key: string, value: string): void {
+  const db = getDb();
+  db.prepare(
+    `
+    INSERT INTO metadata (key, value, updated_at) VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+  `,
+  ).run(key, value);
+}
+
+export function getMetadata(key: string): string | null {
+  const db = getDb();
+  const row = db.prepare("SELECT value FROM metadata WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
+}
+
+export function upsertMembers(members: TeamMember[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO members (email, user_id, name, role, is_removed, last_seen)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(email) DO UPDATE SET
+      user_id = excluded.user_id,
+      name = excluded.name,
+      role = excluded.role,
+      is_removed = excluded.is_removed,
+      last_seen = datetime('now')
+  `);
+
+  const tx = db.transaction(() => {
+    for (const m of members) {
+      stmt.run(m.email, m.id, m.name, m.role, m.isRemoved ? 1 : 0);
+    }
+  });
+  tx();
+}
+
+export function upsertDailyUsage(entries: DailyUsage[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO daily_usage (date, email, user_id, is_active, lines_added, lines_deleted,
+      accepted_lines_added, accepted_lines_deleted, total_applies, total_accepts, total_rejects,
+      total_tabs_shown, tabs_accepted, composer_requests, chat_requests, agent_requests,
+      usage_based_reqs, most_used_model, tab_most_used_extension, client_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(date, email) DO UPDATE SET
+      user_id = excluded.user_id,
+      is_active = excluded.is_active,
+      lines_added = excluded.lines_added,
+      lines_deleted = excluded.lines_deleted,
+      accepted_lines_added = excluded.accepted_lines_added,
+      accepted_lines_deleted = excluded.accepted_lines_deleted,
+      total_applies = excluded.total_applies,
+      total_accepts = excluded.total_accepts,
+      total_rejects = excluded.total_rejects,
+      total_tabs_shown = excluded.total_tabs_shown,
+      tabs_accepted = excluded.tabs_accepted,
+      composer_requests = excluded.composer_requests,
+      chat_requests = excluded.chat_requests,
+      agent_requests = excluded.agent_requests,
+      usage_based_reqs = excluded.usage_based_reqs,
+      most_used_model = excluded.most_used_model,
+      tab_most_used_extension = excluded.tab_most_used_extension,
+      client_version = excluded.client_version,
+      collected_at = datetime('now')
+  `);
+
+  const tx = db.transaction(() => {
+    for (const e of entries) {
+      stmt.run(
+        e.date,
+        e.email,
+        e.userId,
+        e.isActive ? 1 : 0,
+        e.linesAdded,
+        e.linesDeleted,
+        e.acceptedLinesAdded,
+        e.acceptedLinesDeleted,
+        e.totalApplies,
+        e.totalAccepts,
+        e.totalRejects,
+        e.totalTabsShown,
+        e.tabsAccepted,
+        e.composerRequests,
+        e.chatRequests,
+        e.agentRequests,
+        e.usageBasedReqs,
+        e.mostUsedModel,
+        e.tabMostUsedExtension,
+        e.clientVersion,
+      );
+    }
+  });
+  tx();
+}
+
+export function upsertSpending(members: MemberSpend[], cycleStart: string): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO spending (email, user_id, name, cycle_start, spend_cents, included_spend_cents,
+      overall_spend_cents, fast_premium_requests, monthly_limit_dollars, hard_limit_override_dollars)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(email, cycle_start) DO UPDATE SET
+      user_id = excluded.user_id,
+      name = excluded.name,
+      spend_cents = excluded.spend_cents,
+      included_spend_cents = excluded.included_spend_cents,
+      overall_spend_cents = excluded.overall_spend_cents,
+      fast_premium_requests = excluded.fast_premium_requests,
+      monthly_limit_dollars = excluded.monthly_limit_dollars,
+      hard_limit_override_dollars = excluded.hard_limit_override_dollars,
+      collected_at = datetime('now')
+  `);
+
+  const tx = db.transaction(() => {
+    for (const m of members) {
+      stmt.run(
+        m.email,
+        m.userId ?? null,
+        m.name ?? null,
+        cycleStart,
+        m.spendCents ?? 0,
+        m.includedSpendCents ?? 0,
+        m.overallSpendCents ?? m.spendCents ?? 0,
+        m.fastPremiumRequests ?? 0,
+        m.monthlyLimitDollars ?? null,
+        m.hardLimitOverrideDollars ?? 0,
+      );
+    }
+  });
+  tx();
+}
+
+export function upsertDailySpend(members: GroupMemberSpend[], cycleStart: string): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO daily_spend (date, email, spend_cents, cycle_start)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(date, email) DO UPDATE SET
+      spend_cents = MAX(daily_spend.spend_cents, excluded.spend_cents),
+      cycle_start = excluded.cycle_start,
+      collected_at = datetime('now')
+  `);
+
+  const tx = db.transaction(() => {
+    for (const m of members) {
+      for (const ds of m.dailySpend) {
+        stmt.run(ds.date, m.email, ds.spendCents, cycleStart);
+      }
+    }
+  });
+  tx();
+}
+
+export function upsertBillingGroups(
+  groups: Array<{
+    id: string;
+    name: string;
+    memberCount: number;
+    spendCents: number;
+    members: Array<{ email: string; joinedAt: string }>;
+  }>,
+): void {
+  const db = getDb();
+  const groupStmt = db.prepare(`
+    INSERT INTO billing_groups (id, name, member_count, spend_cents)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      member_count = excluded.member_count,
+      spend_cents = excluded.spend_cents,
+      collected_at = datetime('now')
+  `);
+  const memberStmt = db.prepare(`
+    INSERT INTO group_members (group_id, email, joined_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(group_id, email) DO UPDATE SET joined_at = excluded.joined_at
+  `);
+
+  const tx = db.transaction(() => {
+    for (const g of groups) {
+      groupStmt.run(g.id, g.name, g.memberCount, g.spendCents);
+      for (const m of g.members) {
+        memberStmt.run(g.id, m.email, m.joinedAt);
+      }
+    }
+  });
+  tx();
+}
+
+export function getUserDailySpend(email: string): Array<{ date: string; spend_cents: number }> {
+  const db = getDb();
+
+  const cycleRow = db
+    .prepare(
+      `SELECT spend_cents, cycle_start FROM spending WHERE email = ? ORDER BY cycle_start DESC LIMIT 1`,
+    )
+    .get(email) as { spend_cents: number; cycle_start: string } | undefined;
+
+  const cycleStartMs = cycleRow
+    ? new Date(`${cycleRow.cycle_start}T12:00:00.000Z`).getTime()
+    : 0;
+
+  const rawRows =
+    cycleRow && cycleStartMs > 0
+      ? (db
+          .prepare(
+            `SELECT date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') as date,
+              SUM(total_cents) as raw_cents
+             FROM usage_events
+             WHERE user_email = ? AND CAST(timestamp AS INTEGER) >= ?
+             GROUP BY date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch')
+             ORDER BY date`,
+          )
+          .all(email, cycleStartMs) as Array<{ date: string; raw_cents: number }>)
+      : (db
+          .prepare(
+            `SELECT date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') as date,
+              SUM(total_cents) as raw_cents
+             FROM usage_events
+             WHERE user_email = ?
+             GROUP BY date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch')
+             ORDER BY date`,
+          )
+          .all(email) as Array<{ date: string; raw_cents: number }>);
+
+  const sumRaw = rawRows.reduce((s, r) => s + r.raw_cents, 0);
+  const targetCents = cycleRow?.spend_cents ?? 0;
+
+  let spendMap: Map<string, number>;
+  if (targetCents > 0 && sumRaw > 0) {
+    let allocated = 0;
+    const scaled = rawRows.map((r, i) => {
+      const isLast = i === rawRows.length - 1;
+      const cents = isLast ? targetCents - allocated : Math.floor((targetCents * r.raw_cents) / sumRaw);
+      allocated += cents;
+      return { date: r.date, spend_cents: cents };
+    });
+    spendMap = new Map(scaled.map((r) => [r.date, r.spend_cents]));
+  } else {
+    const dsRows = db
+      .prepare(
+        `SELECT date, MAX(spend_cents) as spend_cents FROM daily_spend WHERE email = ? GROUP BY date ORDER BY date`,
+      )
+      .all(email) as Array<{ date: string; spend_cents: number }>;
+    if (dsRows.length > 0) {
+      spendMap = new Map(dsRows.map((r) => [r.date, r.spend_cents]));
+    } else if (rawRows.length > 0) {
+      spendMap = new Map(rawRows.map((r) => [r.date, Math.round(r.raw_cents)]));
+    } else {
+      return [];
+    }
+  }
+
+  const dates = [...spendMap.keys()].sort();
+  if (dates.length === 0) return [];
+  const firstDate = dates[0] ?? "";
+  const start = new Date(`${firstDate}T12:00:00.000Z`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const result: Array<{ date: string; spend_cents: number }> = [];
+  for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().slice(0, 10);
+    result.push({ date: dateStr, spend_cents: spendMap.get(dateStr) ?? 0 });
+  }
+  return result;
+}
+
+export function getUserActivityProfile(email: string, days: number = 30) {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `
+    SELECT
+      SUM(agent_requests) as agent_requests,
+      SUM(chat_requests) as chat_requests,
+      SUM(composer_requests) as composer_requests,
+      SUM(lines_added) as lines_added,
+      SUM(total_accepts) as total_accepts,
+      SUM(total_rejects) as total_rejects,
+      SUM(tabs_accepted) as tabs_accepted,
+      SUM(usage_based_reqs) as usage_based_reqs,
+      SUM(total_tabs_shown) as total_tabs_shown
+    FROM daily_usage WHERE email = ? AND date >= date('now', ?) AND is_active = 1
+  `,
+    )
+    .get(email, `-${days} days`) as Record<string, number> | undefined;
+
+  const teamAvg = db
+    .prepare(
+      `
+    SELECT
+      AVG(total_agent) as agent_requests,
+      AVG(total_chat) as chat_requests,
+      AVG(total_composer) as composer_requests,
+      AVG(total_lines) as lines_added,
+      AVG(total_accepts) as total_accepts,
+      AVG(total_tabs) as tabs_accepted,
+      AVG(total_usage_based) as usage_based_reqs
+    FROM (
+      SELECT email,
+        SUM(agent_requests) as total_agent,
+        SUM(chat_requests) as total_chat,
+        SUM(composer_requests) as total_composer,
+        SUM(lines_added) as total_lines,
+        SUM(total_accepts) as total_accepts,
+        SUM(tabs_accepted) as total_tabs,
+        SUM(usage_based_reqs) as total_usage_based
+      FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1
+      GROUP BY email
+    )
+  `,
+    )
+    .get(`-${days} days`) as Record<string, number> | undefined;
+
+  return { user: row ?? {}, teamAvg: teamAvg ?? {} };
+}
+
+export function getBillingGroups(): Array<{
+  id: string;
+  name: string;
+  member_count: number;
+  spend_cents: number;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      "SELECT id, name, member_count, spend_cents FROM billing_groups ORDER BY spend_cents DESC",
+    )
+    .all() as Array<{ id: string; name: string; member_count: number; spend_cents: number }>;
+}
+
+export function getGroupMembers(groupId: string): string[] {
+  const db = getDb();
+  return (
+    db.prepare("SELECT email FROM group_members WHERE group_id = ?").all(groupId) as Array<{
+      email: string;
+    }>
+  ).map((r) => r.email);
+}
+
+export function getGroupsWithMembers(): Array<{
+  id: string;
+  name: string;
+  member_count: number;
+  spend_cents: number;
+  emails: string[];
+  members: Array<{ email: string; name: string }>;
+}> {
+  const db = getDb();
+  const groups = db
+    .prepare("SELECT id, name, member_count, spend_cents FROM billing_groups ORDER BY name")
+    .all() as Array<{ id: string; name: string; member_count: number; spend_cents: number }>;
+
+  const memberRows = db
+    .prepare(
+      "SELECT gm.group_id, gm.email, COALESCE(m.name, '') as name FROM group_members gm LEFT JOIN members m ON gm.email = m.email",
+    )
+    .all() as Array<{ group_id: string; email: string; name: string }>;
+
+  const membersByGroup = new Map<string, Array<{ email: string; name: string }>>();
+  for (const row of memberRows) {
+    const list = membersByGroup.get(row.group_id) ?? [];
+    list.push({ email: row.email, name: row.name });
+    membersByGroup.set(row.group_id, list);
+  }
+
+  return groups.map((g) => {
+    const memberList = membersByGroup.get(g.id) ?? [];
+    return {
+      ...g,
+      emails: memberList.map((m) => m.email),
+      members: memberList,
+    };
+  });
+}
+
+export function insertAnomaly(anomaly: Anomaly): number {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `INSERT INTO anomalies (user_email, type, severity, metric, value, threshold, message, detected_at, diagnosis_model, diagnosis_kind, diagnosis_delta)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    )
+    .run(
+      anomaly.userEmail,
+      anomaly.type,
+      anomaly.severity,
+      anomaly.metric,
+      anomaly.value,
+      anomaly.threshold,
+      anomaly.message,
+      anomaly.detectedAt,
+      anomaly.diagnosisModel,
+      anomaly.diagnosisKind,
+      anomaly.diagnosisDelta,
+    );
+  return Number(result.lastInsertRowid);
+}
+
+export function resolveAnomaly(id: number): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE anomalies SET resolved_at = datetime('now') WHERE id = ? AND resolved_at IS NULL",
+  ).run(id);
+}
+
+export function markAnomalyAlerted(id: number): void {
+  const db = getDb();
+  db.prepare("UPDATE anomalies SET alerted_at = datetime('now') WHERE id = ?").run(id);
+}
+
+const ANOMALY_SELECT = `SELECT id, user_email as userEmail, type, severity, metric, value, threshold, message,
+  detected_at as detectedAt, resolved_at as resolvedAt, alerted_at as alertedAt,
+  diagnosis_model as diagnosisModel, diagnosis_kind as diagnosisKind, diagnosis_delta as diagnosisDelta
+  FROM anomalies`;
+
+export function getOpenAnomalies(): Anomaly[] {
+  const db = getDb();
+  return db
+    .prepare(`${ANOMALY_SELECT} WHERE resolved_at IS NULL ORDER BY detected_at DESC`)
+    .all() as Anomaly[];
+}
+
+export function getRecentAnomalies(days: number = 30): Anomaly[] {
+  const db = getDb();
+  return db
+    .prepare(`${ANOMALY_SELECT} WHERE detected_at >= datetime('now', ?) ORDER BY detected_at DESC`)
+    .all(`-${days} days`) as Anomaly[];
+}
+
+export function insertIncident(incident: Omit<Incident, "id">): number {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `INSERT INTO incidents (anomaly_id, user_email, status, detected_at, alerted_at, mttd_minutes)
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+    )
+    .run(
+      incident.anomalyId,
+      incident.userEmail,
+      incident.status,
+      incident.detectedAt,
+      incident.alertedAt,
+      incident.mttdMinutes,
+    );
+  return Number(result.lastInsertRowid);
+}
+
+export function updateIncidentStatus(
+  id: number,
+  status: string,
+  times: Partial<
+    Pick<
+      Incident,
+      "alertedAt" | "acknowledgedAt" | "resolvedAt" | "mttdMinutes" | "mttiMinutes" | "mttrMinutes"
+    >
+  >,
+): void {
+  const db = getDb();
+  const sets: string[] = ["status = ?"];
+  const params: unknown[] = [status];
+
+  if (times.alertedAt !== undefined) {
+    sets.push("alerted_at = ?");
+    params.push(times.alertedAt);
+  }
+  if (times.acknowledgedAt !== undefined) {
+    sets.push("acknowledged_at = ?");
+    params.push(times.acknowledgedAt);
+  }
+  if (times.resolvedAt !== undefined) {
+    sets.push("resolved_at = ?");
+    params.push(times.resolvedAt);
+  }
+  if (times.mttdMinutes !== undefined) {
+    sets.push("mttd_minutes = ?");
+    params.push(times.mttdMinutes);
+  }
+  if (times.mttiMinutes !== undefined) {
+    sets.push("mtti_minutes = ?");
+    params.push(times.mttiMinutes);
+  }
+  if (times.mttrMinutes !== undefined) {
+    sets.push("mttr_minutes = ?");
+    params.push(times.mttrMinutes);
+  }
+
+  params.push(id);
+  db.prepare(`UPDATE incidents SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+}
+
+const INCIDENT_SELECT = `SELECT i.id, i.anomaly_id as anomalyId, i.user_email as userEmail, i.status,
+  i.detected_at as detectedAt, i.alerted_at as alertedAt, i.acknowledged_at as acknowledgedAt,
+  i.resolved_at as resolvedAt, i.mttd_minutes as mttdMinutes, i.mtti_minutes as mttiMinutes, i.mttr_minutes as mttrMinutes,
+  a.severity, a.message
+  FROM incidents i LEFT JOIN anomalies a ON i.anomaly_id = a.id`;
+
+export function getOpenIncidents(): Incident[] {
+  const db = getDb();
+  return db
+    .prepare(`${INCIDENT_SELECT} WHERE i.status NOT IN ('resolved') ORDER BY i.detected_at DESC`)
+    .all() as Incident[];
+}
+
+export function getConfig(): DetectionConfig {
+  const db = getDb();
+  const row = db.prepare("SELECT value FROM config WHERE key = 'detection'").get() as
+    | { value: string }
+    | undefined;
+
+  if (!row) return DEFAULT_CONFIG;
+  const stored = JSON.parse(row.value) as Partial<DetectionConfig>;
+  return {
+    thresholds: { ...DEFAULT_CONFIG.thresholds, ...stored.thresholds },
+    zscore: { ...DEFAULT_CONFIG.zscore, ...stored.zscore },
+    trends: { ...DEFAULT_CONFIG.trends, ...stored.trends },
+    planExhaustion: { ...DEFAULT_CONFIG.planExhaustion, ...stored.planExhaustion },
+    cronIntervalMinutes: stored.cronIntervalMinutes ?? DEFAULT_CONFIG.cronIntervalMinutes,
+    enableInfoAnomalies: stored.enableInfoAnomalies ?? DEFAULT_CONFIG.enableInfoAnomalies,
+  };
+}
+
+export function saveConfig(config: DetectionConfig): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO config (key, value) VALUES ('detection', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  ).run(JSON.stringify(config));
+}
+
+export function logCollection(type: string, count: number, error?: string): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO collection_log (type, completed_at, records_count, error) VALUES (?, datetime('now'), ?, ?)",
+  ).run(type, count, error ?? null);
+}
+
+export type {
+  UsageBadge,
+  SpendBadge,
+  ContextBadge,
+  AdoptionBadge,
+  RankedUser,
+  DashboardStats,
+  FullDashboard,
+  ModelEfficiency,
+  UserContextMetrics,
+  CycleSummaryData,
+};
+
+export function getFullDashboard(days: number = 7): FullDashboard {
+  const db = getDb();
+  const dateFilter = `-${days} days`;
+
+  const totalMembers =
+    (db.prepare("SELECT COUNT(*) as c FROM members WHERE is_removed = 0").get() as { c: number })
+      ?.c ?? 0;
+
+  const activeMembers =
+    (
+      db
+        .prepare(
+          "SELECT COUNT(DISTINCT email) as c FROM daily_usage WHERE is_active = 1 AND date >= date('now', ?)",
+        )
+        .get(dateFilter) as { c: number }
+    )?.c ?? 0;
+
+  const cycleRow = db.prepare("SELECT MAX(cycle_start) as cycle_start FROM spending").get() as {
+    cycle_start: string | null;
+  };
+  const cycleStart =
+    getMetadata("cycle_start") ?? cycleRow?.cycle_start ?? new Date().toISOString().slice(0, 10);
+  const cycleEnd = getMetadata("cycle_end") ?? "";
+  const cycleDays = Math.max(
+    1,
+    Math.ceil((Date.now() - new Date(cycleStart).getTime()) / 86_400_000),
+  );
+
+  const billing = cycleBillingAnchor(db);
+
+  const dailySpendWindowFromGroups = () =>
+    (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(spend), 0) as total FROM (
+            SELECT date, email, MAX(spend_cents) as spend FROM daily_spend
+            WHERE date >= date('now', ?) GROUP BY date, email
+          )`,
+        )
+        .get(dateFilter) as { total: number }
+    ).total;
+
+  let totalSpendCentsForWindow: number;
+  if (billing && billing.teamBilledCents > 0) {
+    const fullRaw = (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(total_cents), 0) as t FROM usage_events WHERE CAST(timestamp AS INTEGER) >= ?`,
+        )
+        .get(billing.cycleStartMs) as { t: number }
+    ).t;
+    if (fullRaw > 0) {
+      const windowRaw = (
+        db
+          .prepare(
+            `SELECT COALESCE(SUM(total_cents), 0) as t FROM usage_events
+             WHERE CAST(timestamp AS INTEGER) >= ?
+               AND date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') >= date('now', ?)`,
+          )
+          .get(billing.cycleStartMs, dateFilter) as { t: number }
+      ).t;
+      totalSpendCentsForWindow = Math.round((billing.teamBilledCents * windowRaw) / fullRaw);
+    } else {
+      totalSpendCentsForWindow = dailySpendWindowFromGroups();
+    }
+  } else {
+    totalSpendCentsForWindow = dailySpendWindowFromGroups();
+  }
+
+  const spendRow = { total: totalSpendCentsForWindow };
+
+  const agentRow = db
+    .prepare(
+      "SELECT COALESCE(SUM(agent_requests), 0) as total FROM daily_usage WHERE date >= date('now', ?)",
+    )
+    .get(dateFilter) as { total: number };
+
+  const activeAnomalies =
+    (
+      db.prepare("SELECT COUNT(*) as c FROM anomalies WHERE resolved_at IS NULL").get() as {
+        c: number;
+      }
+    )?.c ?? 0;
+
+  const dailyTeamActivity = db
+    .prepare(
+      `SELECT date,
+        SUM(agent_requests) as total_agent_requests,
+        SUM(lines_added) as total_lines_added,
+        COUNT(DISTINCT CASE WHEN is_active = 1 THEN email END) as active_users
+       FROM daily_usage
+       WHERE date >= date('now', ?)
+       GROUP BY date ORDER BY date`,
+    )
+    .all(dateFilter) as Array<{
+    date: string;
+    total_agent_requests: number;
+    total_lines_added: number;
+    active_users: number;
+  }>;
+
+  const rankedUsers = db
+    .prepare(
+      `WITH user_spend AS (
+          SELECT email, spend_cents
+          FROM spending
+          WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)
+        ),
+        user_cache AS (
+          SELECT user_email as email,
+            ROUND(AVG(CASE WHEN cache_read_tokens > 0 THEN cache_read_tokens END)) as avg_cache_read,
+            ROUND(100.0 * SUM(CASE WHEN max_mode = 1 THEN 1 ELSE 0 END) / COUNT(*)) as max_mode_pct
+          FROM usage_events
+          WHERE date(timestamp/1000, 'unixepoch') >= date('now', ?)
+          GROUP BY user_email
+        ),
+        activity AS (
+          SELECT email,
+            SUM(agent_requests) as agent_requests,
+            SUM(lines_added) as lines_added,
+            SUM(tabs_accepted) as tabs_accepted,
+            SUM(total_tabs_shown) as tabs_shown,
+            SUM(total_applies) as total_applies,
+            SUM(total_accepts) as total_accepts,
+            COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days,
+            MAX(most_used_model) as most_used_model
+          FROM daily_usage
+          WHERE date >= date('now', ?) AND is_active = 1
+          GROUP BY email
+        )
+        SELECT
+          m.email, m.name,
+          COALESCE(us.spend_cents, 0) as spend_cents,
+          0 as included_spend_cents, 0 as fast_premium_requests,
+          COALESCE(a.agent_requests, 0) as agent_requests,
+          COALESCE(a.lines_added, 0) as lines_added,
+          COALESCE(a.most_used_model, '') as most_used_model,
+          COALESCE(a.active_days, 0) as active_days,
+          COALESCE(a.tabs_accepted, 0) as tabs_accepted,
+          COALESCE(a.tabs_shown, 0) as tabs_shown,
+          COALESCE(a.total_applies, 0) as total_applies,
+          COALESCE(a.total_accepts, 0) as total_accepts,
+          COALESCE(uc.avg_cache_read, 0) as avg_cache_read,
+          COALESCE(uc.max_mode_pct, 0) as max_mode_pct,
+          RANK() OVER (ORDER BY COALESCE(us.spend_cents, 0) DESC) as spend_rank,
+          RANK() OVER (ORDER BY COALESCE(a.agent_requests, 0) DESC) as activity_rank
+        FROM members m
+        LEFT JOIN user_spend us ON m.email = us.email
+        LEFT JOIN user_cache uc ON m.email = uc.email
+        LEFT JOIN activity a ON m.email = a.email
+        WHERE m.is_removed = 0
+        ORDER BY COALESCE(us.spend_cents, 0) DESC`,
+    )
+    .all(dateFilter, dateFilter) as Array<{
+    email: string;
+    name: string;
+    spend_cents: number;
+    included_spend_cents: number;
+    fast_premium_requests: number;
+    agent_requests: number;
+    lines_added: number;
+    most_used_model: string;
+    active_days: number;
+    tabs_accepted: number;
+    tabs_shown: number;
+    total_applies: number;
+    total_accepts: number;
+    avg_cache_read: number;
+    max_mode_pct: number;
+    spend_rank: number;
+    activity_rank: number;
+  }>;
+
+  const chartDays = Math.max(days, 7);
+  const chartDateFilter = `-${chartDays} days`;
+
+  let teamDailySpend: Array<{ date: string; spend_cents: number }> = [];
+  if (billing && billing.teamBilledCents > 0) {
+    const fullRaw = (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(total_cents), 0) as t FROM usage_events WHERE CAST(timestamp AS INTEGER) >= ?`,
+        )
+        .get(billing.cycleStartMs) as { t: number }
+    ).t;
+    const rawByDay = db
+      .prepare(
+        `SELECT date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') as date,
+          SUM(total_cents) as raw_cents
+         FROM usage_events
+         WHERE CAST(timestamp AS INTEGER) >= ?
+           AND date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') >= date('now', ?)
+         GROUP BY date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch')
+         ORDER BY date`,
+      )
+      .all(billing.cycleStartMs, chartDateFilter) as Array<{ date: string; raw_cents: number }>;
+    if (fullRaw > 0) {
+      const f = billing.teamBilledCents / fullRaw;
+      teamDailySpend = rawByDay.map((r) => ({
+        date: r.date,
+        spend_cents: Math.round(r.raw_cents * f),
+      }));
+    }
+  }
+  if (teamDailySpend.length === 0) {
+    teamDailySpend = db
+      .prepare(
+        `
+    SELECT date, SUM(spend) as spend_cents FROM (
+      SELECT date, email, MAX(spend_cents) as spend FROM daily_spend
+      WHERE date >= date('now', ?) GROUP BY date, email
+    ) GROUP BY date ORDER BY date
+  `,
+      )
+      .all(chartDateFilter) as Array<{ date: string; spend_cents: number }>;
+  }
+
+  let dailySpendBreakdown: Array<{
+    date: string;
+    email: string;
+    name: string;
+    spend_cents: number;
+  }> = [];
+  if (billing && billing.teamBilledCents > 0) {
+    dailySpendBreakdown = db
+      .prepare(
+        `
+    WITH cb AS (
+      SELECT email, spend_cents FROM spending
+      WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)
+    ),
+    ur AS (
+      SELECT user_email as email, SUM(total_cents) as tr
+      FROM usage_events
+      WHERE CAST(timestamp AS INTEGER) >= ?
+      GROUP BY user_email
+    ),
+    dr AS (
+      SELECT user_email, date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') as date,
+        SUM(total_cents) as rd
+      FROM usage_events
+      WHERE CAST(timestamp AS INTEGER) >= ?
+        AND date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') >= date('now', ?)
+      GROUP BY user_email, date
+    )
+    SELECT x.date, x.email, x.name, x.spend_cents FROM (
+      SELECT dr.date, dr.user_email as email, COALESCE(m.name, dr.user_email) as name,
+        CASE WHEN COALESCE(ur.tr, 0) > 0 AND COALESCE(cb.spend_cents, 0) > 0
+          THEN CAST(ROUND(dr.rd * cb.spend_cents * 1.0 / ur.tr) AS INTEGER)
+          ELSE 0 END as spend_cents
+      FROM dr
+      LEFT JOIN ur ON ur.email = dr.user_email
+      LEFT JOIN cb ON cb.email = dr.user_email
+      LEFT JOIN members m ON m.email = dr.user_email
+    ) x
+    WHERE x.spend_cents > 0
+    ORDER BY x.date, x.spend_cents DESC
+  `,
+      )
+      .all(billing.cycleStartMs, billing.cycleStartMs, chartDateFilter) as Array<{
+      date: string;
+      email: string;
+      name: string;
+      spend_cents: number;
+    }>;
+  }
+  if (dailySpendBreakdown.length === 0) {
+    dailySpendBreakdown = db
+      .prepare(
+        `
+    SELECT ds.date, ds.email,
+      COALESCE(m.name, ds.email) as name,
+      ds.spend_cents
+    FROM (
+      SELECT date, email, MAX(spend_cents) as spend_cents
+      FROM daily_spend
+      WHERE date >= date('now', ?)
+      GROUP BY date, email
+    ) ds
+    LEFT JOIN members m ON ds.email = m.email
+    WHERE ds.spend_cents > 0
+    ORDER BY ds.date, ds.spend_cents DESC
+  `,
+      )
+      .all(chartDateFilter) as Array<{
+      date: string;
+      email: string;
+      name: string;
+      spend_cents: number;
+    }>;
+  }
+
+  const modelCosts = db
+    .prepare(
+      `
+    WITH user_model AS (
+      SELECT email, most_used_model, SUM(agent_requests) as reqs
+      FROM daily_usage WHERE is_active = 1 AND most_used_model != '' AND date >= date('now', ?)
+      GROUP BY email, most_used_model
+    ),
+    primary_model AS (
+      SELECT email, most_used_model FROM user_model
+      WHERE (email, reqs) IN (SELECT email, MAX(reqs) FROM user_model GROUP BY email)
+    ),
+    user_spend AS (
+      SELECT email, spend_cents FROM spending
+      WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)
+    )
+    SELECT pm.most_used_model as model, COUNT(*) as users,
+      ROUND(AVG(COALESCE(us.spend_cents, 0))/100, 0) as avg_spend,
+      ROUND(SUM(COALESCE(us.spend_cents, 0))/100, 0) as total_spend,
+      COALESCE(SUM(du.reqs), 0) as total_reqs,
+      GROUP_CONCAT(pm.email) as emails
+    FROM primary_model pm
+    LEFT JOIN user_spend us ON pm.email = us.email
+    LEFT JOIN (SELECT email, SUM(agent_requests) as reqs FROM daily_usage WHERE date >= date('now', ?) GROUP BY email) du ON pm.email = du.email
+    GROUP BY pm.most_used_model
+    ORDER BY total_spend DESC
+  `,
+    )
+    .all(dateFilter, dateFilter) as Array<{
+    model: string;
+    users: number;
+    avg_spend: number;
+    total_spend: number;
+    total_reqs: number;
+    emails: string;
+  }>;
+
+  const stats: DashboardStats = {
+    totalMembers,
+    activeMembers,
+    totalSpendCents: spendRow.total,
+    totalAgentRequests: agentRow.total,
+    activeAnomalies,
+    cycleStart,
+    cycleEnd,
+    cycleDays,
+    dailyTeamActivity,
+    rankedUsers: assignBadges(rankedUsers, days).map((u, i) => ({ ...u, rank: i + 1 })),
+  };
+
+  return {
+    days,
+    stats,
+    modelCosts: modelCosts.map((mc) => ({
+      ...mc,
+      emails: mc.emails ? mc.emails.split(",") : [],
+    })),
+    teamDailySpend,
+    dailySpendBreakdown,
+  };
+}
+
+function isMaxModel(model: string): boolean {
+  return model.toLowerCase().includes("-max");
+}
+
+function assignBadges(
+  users: Array<{
+    email: string;
+    name: string;
+    spend_cents: number;
+    included_spend_cents: number;
+    fast_premium_requests: number;
+    agent_requests: number;
+    lines_added: number;
+    most_used_model: string;
+    active_days: number;
+    tabs_accepted: number;
+    tabs_shown: number;
+    total_applies: number;
+    total_accepts: number;
+    avg_cache_read: number;
+    max_mode_pct: number;
+    spend_rank: number;
+    activity_rank: number;
+  }>,
+  periodDays: number = 7,
+): Array<
+  (typeof users)[number] & {
+    usage_badge: UsageBadge | null;
+    spend_badge: SpendBadge | null;
+    context_badge: ContextBadge | null;
+    adoption_badge: AdoptionBadge | null;
+  }
+> {
+  const activeUsersForIntensity = users.filter((u) => u.agent_requests >= 10 && u.active_days > 0);
+  const intensities = activeUsersForIntensity
+    .map((u) => u.agent_requests / u.active_days)
+    .sort((a, b) => a - b);
+  const p90Intensity = intensities[Math.floor(intensities.length * 0.9)] ?? 50;
+
+  const activeUsers = users.filter((u) => u.agent_requests >= 30);
+  const reqValues = activeUsers.map((u) => u.agent_requests).sort((a, b) => a - b);
+
+  const p80Reqs = reqValues[Math.floor(reqValues.length * 0.8)] ?? 0;
+  const spendingUsers = activeUsers.filter((u) => u.spend_cents > 0);
+  const medianSpend =
+    spendingUsers.length > 0
+      ? (spendingUsers.map((u) => u.spend_cents).sort((a, b) => a - b)[
+          Math.floor(spendingUsers.length * 0.5)
+        ] ?? 0)
+      : 0;
+  const spendingCprs = spendingUsers
+    .filter((u) => u.agent_requests > 0)
+    .map((u) => u.spend_cents / u.agent_requests)
+    .sort((a, b) => a - b);
+  const medianCpr =
+    spendingCprs.length > 0 ? (spendingCprs[Math.floor(spendingCprs.length * 0.5)] ?? 0) : 0;
+
+  const LONG_SESSION_THRESHOLD = 700_000;
+
+  return users.map((u) => {
+    let usage_badge: UsageBadge | null;
+    let spend_badge: SpendBadge | null = null;
+    let context_badge: ContextBadge | null = null;
+
+    if (u.agent_requests < 10) {
+      usage_badge = "light-user";
+    } else {
+      const reqsPerDay = u.active_days > 0 ? u.agent_requests / u.active_days : 0;
+      const usesMax = u.max_mode_pct > 50 || isMaxModel(u.most_used_model);
+
+      if (usesMax) {
+        usage_badge = "deep-thinker";
+      } else if (reqsPerDay >= 80) {
+        usage_badge = "power-user";
+      } else {
+        usage_badge = "balanced";
+      }
+    }
+
+    if (u.agent_requests >= 30 && u.spend_cents > 0) {
+      const cpr = u.spend_cents / u.agent_requests;
+      const overBudget = u.spend_cents > medianSpend * 5 && u.spend_cents > 10000;
+
+      if (overBudget) {
+        spend_badge = "over-budget";
+      } else if ((u.max_mode_pct > 50 || isMaxModel(u.most_used_model)) && medianCpr > 0 && cpr > medianCpr * 3) {
+        spend_badge = "premium-model";
+      } else if (u.agent_requests >= p80Reqs && medianCpr > 0 && cpr <= medianCpr * 0.5) {
+        spend_badge = "cost-efficient";
+      }
+    }
+
+    const SHORT_SESSION_THRESHOLD = 300_000;
+    if (u.agent_requests >= 30 && u.avg_cache_read > LONG_SESSION_THRESHOLD) {
+      context_badge = "long-sessions";
+    } else if (
+      u.agent_requests >= 30 &&
+      u.avg_cache_read > 0 &&
+      u.avg_cache_read < SHORT_SESSION_THRESHOLD
+    ) {
+      context_badge = "short-sessions";
+    }
+
+    let adoption_badge: AdoptionBadge | null = null;
+    if (u.agent_requests >= 10 && u.active_days > 0) {
+      const acceptRate = u.total_applies > 0 ? u.total_accepts / u.total_applies : 0;
+      const intensity = u.agent_requests / u.active_days;
+      const intensityNorm = Math.min(intensity / p90Intensity, 1);
+      const consistency = periodDays > 0 ? u.active_days / periodDays : 0;
+      const score = acceptRate * 40 + intensityNorm * 40 + consistency * 20;
+      if (score >= 80) adoption_badge = "ai-native";
+      else if (score >= 55) adoption_badge = "high-adoption";
+      else if (score >= 30) adoption_badge = "moderate-adoption";
+      else if (score >= 10) adoption_badge = "low-adoption";
+      else adoption_badge = "manual-coder";
+    }
+
+    return {
+      ...u,
+      usage_badge,
+      spend_badge,
+      context_badge,
+      adoption_badge,
+    };
+  });
+}
+
+export function getUserBadges(
+  email: string,
+  days: number = 30,
+): {
+  usage: UsageBadge | null;
+  spend: SpendBadge | null;
+  context: ContextBadge | null;
+  adoption: AdoptionBadge | null;
+} {
+  const db = getDb();
+  const dateFilter = `-${days} days`;
+
+  const userRow = db
+    .prepare(
+      `SELECT SUM(agent_requests) as agent_requests, SUM(lines_added) as lines_added,
+        SUM(tabs_accepted) as tabs_accepted, SUM(total_tabs_shown) as tabs_shown,
+        COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days,
+        MAX(most_used_model) as most_used_model
+       FROM daily_usage WHERE email = ? AND date >= date('now', ?) AND is_active = 1`,
+    )
+    .get(email, dateFilter) as
+    | {
+        agent_requests: number;
+        lines_added: number;
+        tabs_accepted: number;
+        tabs_shown: number;
+        active_days: number;
+        most_used_model: string;
+      }
+    | undefined;
+
+  if (!userRow || !userRow.agent_requests) {
+    return { usage: null, spend: null, context: null, adoption: null };
+  }
+
+  const spendRow = db
+    .prepare(
+      `SELECT COALESCE(s.spend_cents, 0) as spend_cents
+       FROM spending s
+       WHERE s.email = ? AND s.cycle_start = (SELECT MAX(cycle_start) FROM spending)`,
+    )
+    .get(email) as { spend_cents: number };
+
+  const maxModeRow = db
+    .prepare(
+      `SELECT ROUND(100.0 * SUM(CASE WHEN max_mode = 1 THEN 1 ELSE 0 END) / COUNT(*)) as pct
+       FROM usage_events WHERE user_email = ? AND date(timestamp/1000, 'unixepoch') >= date('now', ?)`,
+    )
+    .get(email, dateFilter) as { pct: number | null };
+  const userMaxModePct = maxModeRow?.pct ?? 0;
+
+  const teamStats = db
+    .prepare(
+      `SELECT du.email, SUM(du.agent_requests) as reqs, COALESCE(MAX(sp.spend_cents), 0) as spend
+       FROM daily_usage du
+       LEFT JOIN spending sp ON sp.email = du.email
+         AND sp.cycle_start = (SELECT MAX(cycle_start) FROM spending)
+       WHERE du.date >= date('now', ?) AND du.is_active = 1
+       GROUP BY du.email HAVING SUM(du.agent_requests) >= 30`,
+    )
+    .all(dateFilter) as Array<{ email: string; reqs: number; spend: number }>;
+
+  const spendValues = teamStats
+    .filter((t) => t.spend > 0)
+    .map((t) => t.spend)
+    .sort((a, b) => a - b);
+  const medianSpend =
+    spendValues.length > 0 ? (spendValues[Math.floor(spendValues.length / 2)] ?? 0) : 0;
+  const cprValues = teamStats
+    .filter((t) => t.spend > 0 && t.reqs > 0)
+    .map((t) => t.spend / t.reqs)
+    .sort((a, b) => a - b);
+  const medianCpr = cprValues.length > 0 ? (cprValues[Math.floor(cprValues.length / 2)] ?? 0) : 0;
+  const reqValues = teamStats.map((t) => t.reqs).sort((a, b) => a - b);
+  const p80Reqs = reqValues[Math.floor(reqValues.length * 0.8)] ?? 0;
+
+  let usage: UsageBadge | null;
+  if (userRow.agent_requests < 10) {
+    usage = "light-user";
+  } else {
+    const reqsPerDay = userRow.active_days > 0 ? userRow.agent_requests / userRow.active_days : 0;
+    const usesMax = userMaxModePct > 50 || isMaxModel(userRow.most_used_model);
+    if (usesMax) usage = "deep-thinker";
+    else if (reqsPerDay >= 80) usage = "power-user";
+    else usage = null;
+  }
+
+  let spend: SpendBadge | null = null;
+  if (userRow.agent_requests >= 30 && spendRow.spend_cents > 0) {
+    const cpr = spendRow.spend_cents / userRow.agent_requests;
+    if (spendRow.spend_cents > medianSpend * 5 && spendRow.spend_cents > 10000) {
+      spend = "over-budget";
+    } else if ((userMaxModePct > 50 || isMaxModel(userRow.most_used_model)) && medianCpr > 0 && cpr > medianCpr * 3) {
+      spend = "premium-model";
+    } else if (userRow.agent_requests >= p80Reqs && medianCpr > 0 && cpr <= medianCpr * 0.5) {
+      spend = "cost-efficient";
+    }
+  }
+
+  const cacheRow = db
+    .prepare(
+      `SELECT ROUND(AVG(cache_read_tokens)) as avg_cr FROM usage_events
+       WHERE user_email = ? AND date(timestamp/1000, 'unixepoch') >= date('now', ?) AND cache_read_tokens > 0`,
+    )
+    .get(email, dateFilter) as { avg_cr: number | null } | undefined;
+
+  let context: ContextBadge | null = null;
+  const avgCr = cacheRow?.avg_cr ?? 0;
+  if (userRow.agent_requests >= 30 && avgCr > 700_000) context = "long-sessions";
+  else if (userRow.agent_requests >= 30 && avgCr > 0 && avgCr < 300_000) context = "short-sessions";
+
+  let adoption: AdoptionBadge | null = null;
+  if (userRow.agent_requests >= 10 && userRow.active_days > 0) {
+    const teamIntensities = db
+      .prepare(
+        `SELECT SUM(agent_requests) * 1.0 / COUNT(CASE WHEN is_active = 1 THEN 1 END) as rpd
+        FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1
+        GROUP BY email HAVING SUM(agent_requests) >= 10
+        ORDER BY rpd`,
+      )
+      .all(dateFilter) as Array<{ rpd: number }>;
+    const p90i = teamIntensities[Math.floor(teamIntensities.length * 0.9)]?.rpd ?? 50;
+    const acceptRate =
+      userRow.agent_requests >= 10 && userRow.tabs_accepted + userRow.agent_requests > 0
+        ? (db
+            .prepare(
+              `SELECT SUM(total_applies) as ap, SUM(total_accepts) as ac
+           FROM daily_usage WHERE email = ? AND date >= date('now', ?) AND is_active = 1`,
+            )
+            .get(email, dateFilter) as { ap: number; ac: number })
+        : { ap: 0, ac: 0 };
+    const ar = acceptRate.ap > 0 ? acceptRate.ac / acceptRate.ap : 0;
+    const intensity = userRow.agent_requests / userRow.active_days;
+    const intensityNorm = Math.min(intensity / p90i, 1);
+    const elapsedBadge = db
+      .prepare(
+        `SELECT CAST(julianday('now') - julianday(MIN(date)) AS INTEGER) + 1 as elapsed
+         FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1`,
+      )
+      .get(dateFilter) as { elapsed: number | null } | undefined;
+    const periodForBadge = Math.min(days, elapsedBadge?.elapsed ?? days);
+    const consistency = periodForBadge > 0 ? userRow.active_days / periodForBadge : 0;
+    const score = ar * 40 + intensityNorm * 40 + consistency * 20;
+    if (score >= 80) adoption = "ai-native";
+    else if (score >= 55) adoption = "high-adoption";
+    else if (score >= 30) adoption = "moderate-adoption";
+    else if (score >= 10) adoption = "low-adoption";
+    else adoption = "manual-coder";
+  }
+
+  return { usage, spend, context, adoption };
+}
+
+export function getDashboardStats(days: number = 7): DashboardStats {
+  return getFullDashboard(days).stats;
+}
+
+export function getUserStats(email: string, days: number = 7) {
+  const db = getDb();
+
+  const member = db.prepare("SELECT * FROM members WHERE email = ?").get(email) as
+    | (TeamMember & { first_seen: string; last_seen: string })
+    | undefined;
+
+  const spending = db
+    .prepare("SELECT * FROM spending WHERE email = ? ORDER BY cycle_start DESC LIMIT 6")
+    .all(email) as Array<{
+    cycle_start: string;
+    spend_cents: number;
+    included_spend_cents: number;
+    fast_premium_requests: number;
+  }>;
+
+  const dailyActivity = db
+    .prepare(
+      `SELECT date, agent_requests, lines_added, lines_deleted, total_accepts, total_rejects,
+        tabs_accepted, usage_based_reqs, most_used_model, client_version
+       FROM daily_usage
+       WHERE email = ? AND date >= date('now', ?)
+       ORDER BY date`,
+    )
+    .all(email, `-${days} days`) as Array<{
+    date: string;
+    agent_requests: number;
+    lines_added: number;
+    lines_deleted: number;
+    total_accepts: number;
+    total_rejects: number;
+    tabs_accepted: number;
+    usage_based_reqs: number;
+    most_used_model: string;
+    client_version: string;
+  }>;
+
+  const modelBreakdown = db
+    .prepare(
+      `SELECT most_used_model as model, COUNT(*) as days_used, SUM(agent_requests) as total_requests
+       FROM daily_usage
+       WHERE email = ? AND date >= date('now', ?) AND most_used_model != ''
+       GROUP BY most_used_model
+       ORDER BY total_requests DESC`,
+    )
+    .all(email, `-${days} days`) as Array<{
+    model: string;
+    days_used: number;
+    total_requests: number;
+  }>;
+
+  const anomalies = db
+    .prepare(`${ANOMALY_SELECT} WHERE user_email = ? ORDER BY detected_at DESC LIMIT 20`)
+    .all(email) as Anomaly[];
+
+  const dailySpend = getUserDailySpend(email);
+  const billCycleStart = spending[0]?.cycle_start ?? null;
+  const usageEventsSummaryRaw = getUserUsageEventsSummary(email, days, billCycleStart);
+  const billedCents = spending[0]?.spend_cents ?? 0;
+  const sumTokenCents = usageEventsSummaryRaw.reduce((s, r) => s + r.total_cost_cents, 0);
+  const billScale = billedCents > 0 && sumTokenCents > 0 ? billedCents / sumTokenCents : 1;
+  const usageEventsSummary = usageEventsSummaryRaw.map((r) => ({
+    ...r,
+    total_cost_cents: r.total_cost_cents * billScale,
+    avg_cost_cents: r.avg_cost_cents * billScale,
+    plan_cost_cents: r.plan_cost_cents * billScale,
+    overage_cost_cents: r.overage_cost_cents * billScale,
+  }));
+  const mcpSummary = getUserMCPSummary(email, days);
+  const commandsSummary = getUserCommandsSummary(email, days);
+  const contextMetrics = getUserContextMetrics(email, days);
+  const badges = getUserBadges(email, days);
+  const aiAdoption = getUserAIAdoption(email, days);
+  const repoBreakdown = getUserRepoBreakdown(email, days);
+
+  const ranksRow = db
+    .prepare(
+      `WITH all_emails AS (
+        SELECT DISTINCT user_email as email FROM usage_events WHERE CAST(timestamp AS INTEGER) >= ?
+        UNION
+        SELECT DISTINCT email FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1 AND agent_requests > 0
+      ),
+      user_spend AS (
+        SELECT email, spend_cents as spend
+        FROM spending
+        WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)
+      ),
+      user_activity AS (
+        SELECT email, SUM(agent_requests) as reqs
+        FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1
+        GROUP BY email
+      ),
+      ranked AS (
+        SELECT
+          e.email,
+          RANK() OVER (ORDER BY COALESCE(s.spend, 0) DESC) as spend_rank,
+          RANK() OVER (ORDER BY COALESCE(a.reqs, 0) DESC) as activity_rank,
+          COUNT(*) OVER () as total_ranked
+        FROM all_emails e
+        LEFT JOIN user_spend s ON e.email = s.email
+        LEFT JOIN user_activity a ON e.email = a.email
+      )
+      SELECT spend_rank, activity_rank, total_ranked FROM ranked WHERE email = ?`,
+    )
+    .get(
+      Date.now() - days * 24 * 60 * 60 * 1000,
+      `-${days} days`,
+      `-${days} days`,
+      email,
+    ) as { spend_rank: number; activity_rank: number; total_ranked: number } | undefined;
+
+  const groupRow = db
+    .prepare(
+      `SELECT bg.id, bg.name FROM group_members gm
+       JOIN billing_groups bg ON bg.id = gm.group_id
+       WHERE gm.email = ? AND bg.name != 'Unassigned'
+       LIMIT 1`,
+    )
+    .get(email) as { id: string; name: string } | undefined;
+
+  const cycleRow = db.prepare("SELECT MAX(cycle_start) as cs FROM spending").get() as {
+    cs: string | null;
+  };
+  const cycleStart = cycleRow?.cs;
+  let planExhaustion: { daysToExhaust: number; usageBasedReqs: number; cycleDay: number } | null =
+    null;
+  if (cycleStart) {
+    const exhaustRow = db
+      .prepare(
+        `SELECT CAST(julianday(MIN(du.date)) - julianday(?) + 1 AS INT) as days_to_exhaust,
+            SUM(du.usage_based_reqs) as usage_based_reqs
+         FROM daily_usage du
+         WHERE du.email = ? AND du.date >= ? AND du.usage_based_reqs > 0`,
+      )
+      .get(cycleStart, email, cycleStart) as
+      | {
+          days_to_exhaust: number | null;
+          usage_based_reqs: number | null;
+        }
+      | undefined;
+    if (exhaustRow?.days_to_exhaust != null) {
+      const cycleDayNum =
+        Math.floor((Date.now() - new Date(cycleStart).getTime()) / (24 * 60 * 60 * 1000)) + 1;
+      planExhaustion = {
+        daysToExhaust: exhaustRow.days_to_exhaust,
+        usageBasedReqs: exhaustRow.usage_based_reqs ?? 0,
+        cycleDay: cycleDayNum,
+      };
+    }
+  }
+
+  return {
+    member,
+    spending,
+    dailyActivity,
+    modelBreakdown,
+    anomalies,
+    dailySpend,
+    usageEventsSummary,
+    mcpSummary,
+    commandsSummary,
+    ranks: ranksRow
+      ? {
+          spendRank: ranksRow.spend_rank,
+          activityRank: ranksRow.activity_rank,
+          totalRanked: ranksRow.total_ranked,
+        }
+      : null,
+    group: groupRow ?? null,
+    contextMetrics,
+    badges,
+    aiAdoption,
+    planExhaustion,
+    repoBreakdown,
+  };
+}
+
+export function getAnomalyTimeline(days: number = 30) {
+  const db = getDb();
+
+  const anomalies = db
+    .prepare(`${ANOMALY_SELECT} WHERE detected_at >= datetime('now', ?) ORDER BY detected_at DESC`)
+    .all(`-${days} days`) as Anomaly[];
+
+  const incidents = db
+    .prepare(
+      `${INCIDENT_SELECT} WHERE i.detected_at >= datetime('now', ?) ORDER BY i.detected_at DESC`,
+    )
+    .all(`-${days} days`) as Incident[];
+
+  const avgMttd = db
+    .prepare(
+      "SELECT AVG(mttd_minutes) as avg FROM incidents WHERE mttd_minutes IS NOT NULL AND detected_at >= datetime('now', ?)",
+    )
+    .get(`-${days} days`) as { avg: number | null };
+
+  const avgMtti = db
+    .prepare(
+      "SELECT AVG(mtti_minutes) as avg FROM incidents WHERE mtti_minutes IS NOT NULL AND detected_at >= datetime('now', ?)",
+    )
+    .get(`-${days} days`) as { avg: number | null };
+
+  const avgMttr = db
+    .prepare(
+      "SELECT AVG(mttr_minutes) as avg FROM incidents WHERE mttr_minutes IS NOT NULL AND detected_at >= datetime('now', ?)",
+    )
+    .get(`-${days} days`) as { avg: number | null };
+
+  return {
+    anomalies,
+    incidents,
+    avgMttdMinutes: avgMttd.avg,
+    avgMttiMinutes: avgMtti.avg,
+    avgMttrMinutes: avgMttr.avg,
+  };
+}
+
+export function getModelCostBreakdown(): Array<{
+  model: string;
+  users: number;
+  avg_spend: number;
+  total_spend: number;
+  total_reqs: number;
+  emails: string[];
+}> {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `
+    WITH user_model AS (
+      SELECT email, most_used_model, SUM(agent_requests) as reqs
+      FROM daily_usage WHERE is_active = 1 AND most_used_model != ''
+      GROUP BY email, most_used_model
+    ),
+    primary_model AS (
+      SELECT email, most_used_model FROM user_model
+      WHERE (email, reqs) IN (SELECT email, MAX(reqs) FROM user_model GROUP BY email)
+    )
+    SELECT pm.most_used_model as model, COUNT(*) as users,
+      ROUND(AVG(s.spend_cents)/100, 0) as avg_spend,
+      ROUND(SUM(s.spend_cents)/100, 0) as total_spend,
+      COALESCE(SUM(du.reqs), 0) as total_reqs,
+      GROUP_CONCAT(pm.email) as emails
+    FROM primary_model pm
+    JOIN spending s ON pm.email = s.email
+    LEFT JOIN (SELECT email, SUM(agent_requests) as reqs FROM daily_usage GROUP BY email) du ON pm.email = du.email
+    GROUP BY pm.most_used_model
+    ORDER BY total_spend DESC
+  `,
+    )
+    .all() as Array<{
+    model: string;
+    users: number;
+    avg_spend: number;
+    total_spend: number;
+    total_reqs: number;
+    emails: string;
+  }>;
+  return rows.map((r) => ({ ...r, emails: r.emails ? r.emails.split(",") : [] }));
+}
+
+export function getTeamDailySpend(): Array<{ date: string; spend_cents: number }> {
+  const db = getDb();
+  const billing = cycleBillingAnchor(db);
+  const fromDailySpend = () =>
+    db
+      .prepare(
+        `SELECT date, SUM(spend) as spend_cents FROM (
+          SELECT date, email, MAX(spend_cents) as spend FROM daily_spend GROUP BY date, email
+        ) GROUP BY date ORDER BY date`,
+      )
+      .all() as Array<{ date: string; spend_cents: number }>;
+
+  if (!billing || billing.teamBilledCents <= 0) {
+    return fromDailySpend();
+  }
+  const fullRaw = (
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(total_cents), 0) as t FROM usage_events WHERE CAST(timestamp AS INTEGER) >= ?`,
+      )
+      .get(billing.cycleStartMs) as { t: number }
+  ).t;
+  const rawByDay = db
+    .prepare(
+      `SELECT date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') as date,
+        SUM(total_cents) as raw_cents
+       FROM usage_events
+       WHERE CAST(timestamp AS INTEGER) >= ?
+       GROUP BY date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch')
+       ORDER BY date`,
+    )
+    .all(billing.cycleStartMs) as Array<{ date: string; raw_cents: number }>;
+  if (fullRaw <= 0 || rawByDay.length === 0) {
+    return fromDailySpend();
+  }
+  const f = billing.teamBilledCents / fullRaw;
+  return rawByDay.map((r) => ({ date: r.date, spend_cents: Math.round(r.raw_cents * f) }));
+}
+
+export function getDailySpendBreakdown(): Array<{
+  date: string;
+  email: string;
+  name: string;
+  spend_cents: number;
+}> {
+  const db = getDb();
+  const billing = cycleBillingAnchor(db);
+  const fromDailySpend = () =>
+    db
+      .prepare(
+        `SELECT ds.date, ds.email,
+          COALESCE(m.name, ds.email) as name,
+          ds.spend_cents
+        FROM (
+          SELECT date, email, MAX(spend_cents) as spend_cents
+          FROM daily_spend GROUP BY date, email
+        ) ds
+        LEFT JOIN members m ON ds.email = m.email
+        WHERE ds.spend_cents > 0
+        ORDER BY ds.date, ds.spend_cents DESC`,
+      )
+      .all() as Array<{ date: string; email: string; name: string; spend_cents: number }>;
+
+  if (!billing || billing.teamBilledCents <= 0) {
+    return fromDailySpend();
+  }
+  const rows = db
+    .prepare(
+      `
+    WITH cb AS (
+      SELECT email, spend_cents FROM spending
+      WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)
+    ),
+    ur AS (
+      SELECT user_email as email, SUM(total_cents) as tr
+      FROM usage_events
+      WHERE CAST(timestamp AS INTEGER) >= ?
+      GROUP BY user_email
+    ),
+    dr AS (
+      SELECT user_email, date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') as date,
+        SUM(total_cents) as rd
+      FROM usage_events
+      WHERE CAST(timestamp AS INTEGER) >= ?
+      GROUP BY user_email, date
+    )
+    SELECT x.date, x.email, x.name, x.spend_cents FROM (
+      SELECT dr.date, dr.user_email as email, COALESCE(m.name, dr.user_email) as name,
+        CASE WHEN COALESCE(ur.tr, 0) > 0 AND COALESCE(cb.spend_cents, 0) > 0
+          THEN CAST(ROUND(dr.rd * cb.spend_cents * 1.0 / ur.tr) AS INTEGER)
+          ELSE 0 END as spend_cents
+      FROM dr
+      LEFT JOIN ur ON ur.email = dr.user_email
+      LEFT JOIN cb ON cb.email = dr.user_email
+      LEFT JOIN members m ON m.email = dr.user_email
+    ) x
+    WHERE x.spend_cents > 0
+    ORDER BY x.date, x.spend_cents DESC
+  `,
+    )
+    .all(billing.cycleStartMs, billing.cycleStartMs) as Array<{
+    date: string;
+    email: string;
+    name: string;
+    spend_cents: number;
+  }>;
+  return rows.length > 0 ? rows : fromDailySpend();
+}
+
+export function upsertAnalyticsDAU(entries: AnalyticsDAUEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_dau (date, dau, cli_dau, cloud_agent_dau, bugbot_dau)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(date) DO UPDATE SET
+      dau = excluded.dau, cli_dau = excluded.cli_dau,
+      cloud_agent_dau = excluded.cloud_agent_dau, bugbot_dau = excluded.bugbot_dau,
+      collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) stmt.run(e.date, e.dau, e.cli_dau, e.cloud_agent_dau, e.bugbot_dau);
+  });
+  tx();
+}
+
+export function upsertAnalyticsModelUsage(entries: AnalyticsModelUsageEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_model_usage (date, model, messages, users)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(date, model) DO UPDATE SET
+      messages = excluded.messages, users = excluded.users, collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const entry of entries) {
+      for (const [model, stats] of Object.entries(entry.model_breakdown)) {
+        stmt.run(entry.date, model, stats.messages, stats.users);
+      }
+    }
+  });
+  tx();
+}
+
+export function upsertAnalyticsAgentEdits(entries: AnalyticsAgentEditsEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_agent_edits (date, suggested_diffs, accepted_diffs, rejected_diffs,
+      lines_suggested, lines_accepted, green_lines_accepted, red_lines_accepted)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(date) DO UPDATE SET
+      suggested_diffs = excluded.suggested_diffs, accepted_diffs = excluded.accepted_diffs,
+      rejected_diffs = excluded.rejected_diffs, lines_suggested = excluded.lines_suggested,
+      lines_accepted = excluded.lines_accepted, green_lines_accepted = excluded.green_lines_accepted,
+      red_lines_accepted = excluded.red_lines_accepted, collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) {
+      stmt.run(
+        e.event_date,
+        e.total_suggested_diffs,
+        e.total_accepted_diffs,
+        e.total_rejected_diffs,
+        e.total_lines_suggested,
+        e.total_lines_accepted,
+        e.total_green_lines_accepted,
+        e.total_red_lines_accepted,
+      );
+    }
+  });
+  tx();
+}
+
+export function upsertAnalyticsTabs(entries: AnalyticsTabsEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_tabs (date, suggestions, accepts, rejects, lines_suggested, lines_accepted)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(date) DO UPDATE SET
+      suggestions = excluded.suggestions, accepts = excluded.accepts, rejects = excluded.rejects,
+      lines_suggested = excluded.lines_suggested, lines_accepted = excluded.lines_accepted,
+      collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) {
+      stmt.run(
+        e.event_date,
+        e.total_suggestions,
+        e.total_accepts,
+        e.total_rejects,
+        e.total_lines_suggested,
+        e.total_lines_accepted,
+      );
+    }
+  });
+  tx();
+}
+
+export function upsertAnalyticsMCP(entries: AnalyticsMCPEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_mcp (date, tool_name, server_name, usage)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(date, tool_name, server_name) DO UPDATE SET
+      usage = excluded.usage, collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) stmt.run(e.event_date, e.tool_name, e.mcp_server_name, e.usage);
+  });
+  tx();
+}
+
+export function upsertAnalyticsFileExtensions(entries: AnalyticsFileExtensionsEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_file_extensions (date, extension, total_files, lines_accepted)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(date, extension) DO UPDATE SET
+      total_files = excluded.total_files, lines_accepted = excluded.lines_accepted,
+      collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries)
+      stmt.run(e.event_date, e.file_extension, e.total_files, e.total_lines_accepted);
+  });
+  tx();
+}
+
+export function upsertAnalyticsClientVersions(entries: AnalyticsClientVersionsEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_client_versions (date, version, user_count, percentage)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(date, version) DO UPDATE SET
+      user_count = excluded.user_count, percentage = excluded.percentage,
+      collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) stmt.run(e.event_date, e.client_version, e.user_count, e.percentage);
+  });
+  tx();
+}
+
+export function getAnalyticsDAU(days: number = 30): Array<{
+  date: string;
+  dau: number;
+  cli_dau: number;
+  cloud_agent_dau: number;
+  bugbot_dau: number;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      "SELECT date, dau, cli_dau, cloud_agent_dau, bugbot_dau FROM analytics_dau WHERE date >= date('now', ?) ORDER BY date",
+    )
+    .all(`-${days} days`) as Array<{
+    date: string;
+    dau: number;
+    cli_dau: number;
+    cloud_agent_dau: number;
+    bugbot_dau: number;
+  }>;
+}
+
+export function getAnalyticsModelUsageTrend(
+  days: number = 30,
+): Array<{ date: string; model: string; messages: number; users: number }> {
+  const db = getDb();
+  return db
+    .prepare(
+      "SELECT date, model, messages, users FROM analytics_model_usage WHERE date >= date('now', ?) ORDER BY date, messages DESC",
+    )
+    .all(`-${days} days`) as Array<{
+    date: string;
+    model: string;
+    messages: number;
+    users: number;
+  }>;
+}
+
+export function getAnalyticsModelUsageSummary(days: number = 30): Array<{
+  model: string;
+  total_messages: number;
+  total_users: number;
+  avg_daily_messages: number;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+    SELECT model, SUM(messages) as total_messages, MAX(users) as total_users,
+      ROUND(AVG(messages), 0) as avg_daily_messages
+    FROM analytics_model_usage WHERE date >= date('now', ?)
+    GROUP BY model ORDER BY total_messages DESC
+  `,
+    )
+    .all(`-${days} days`) as Array<{
+    model: string;
+    total_messages: number;
+    total_users: number;
+    avg_daily_messages: number;
+  }>;
+}
+
+export function getAnalyticsAgentEditsTrend(days: number = 30): Array<{
+  date: string;
+  accepted_diffs: number;
+  rejected_diffs: number;
+  lines_accepted: number;
+  lines_suggested: number;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      "SELECT date, accepted_diffs, rejected_diffs, lines_accepted, lines_suggested FROM analytics_agent_edits WHERE date >= date('now', ?) ORDER BY date",
+    )
+    .all(`-${days} days`) as Array<{
+    date: string;
+    accepted_diffs: number;
+    rejected_diffs: number;
+    lines_accepted: number;
+    lines_suggested: number;
+  }>;
+}
+
+export function getAnalyticsTabsTrend(
+  days: number = 30,
+): Array<{ date: string; suggestions: number; accepts: number; lines_accepted: number }> {
+  const db = getDb();
+  return db
+    .prepare(
+      "SELECT date, suggestions, accepts, lines_accepted FROM analytics_tabs WHERE date >= date('now', ?) ORDER BY date",
+    )
+    .all(`-${days} days`) as Array<{
+    date: string;
+    suggestions: number;
+    accepts: number;
+    lines_accepted: number;
+  }>;
+}
+
+export function getAnalyticsMCPSummary(
+  days: number = 30,
+  emails?: string[],
+): Array<{ server_name: string; tool_name: string; total_usage: number }> {
+  const db = getDb();
+  if (emails?.length) {
+    const placeholders = emails.map(() => "?").join(",");
+    return db
+      .prepare(
+        `SELECT server_name, tool_name, SUM(usage) as total_usage
+         FROM analytics_user_mcp WHERE date >= date('now', ?) AND email IN (${placeholders})
+         GROUP BY server_name, tool_name ORDER BY total_usage DESC LIMIT 20`,
+      )
+      .all(`-${days} days`, ...emails) as Array<{
+      server_name: string;
+      tool_name: string;
+      total_usage: number;
+    }>;
+  }
+  return db
+    .prepare(
+      `
+    SELECT server_name, tool_name, SUM(usage) as total_usage
+    FROM analytics_mcp WHERE date >= date('now', ?)
+    GROUP BY server_name, tool_name ORDER BY total_usage DESC LIMIT 20
+  `,
+    )
+    .all(`-${days} days`) as Array<{ server_name: string; tool_name: string; total_usage: number }>;
+}
+
+export function getAnalyticsFileExtensionsSummary(
+  days: number = 30,
+): Array<{ extension: string; total_files: number; total_lines_accepted: number }> {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+    SELECT extension, SUM(total_files) as total_files, SUM(lines_accepted) as total_lines_accepted
+    FROM analytics_file_extensions WHERE date >= date('now', ?)
+    GROUP BY extension ORDER BY total_lines_accepted DESC LIMIT 10
+  `,
+    )
+    .all(`-${days} days`) as Array<{
+    extension: string;
+    total_files: number;
+    total_lines_accepted: number;
+  }>;
+}
+
+export function getAnalyticsClientVersionsSummary(): Array<{
+  version: string;
+  user_count: number;
+  percentage: number;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+    SELECT version, MAX(user_count) as user_count, MAX(percentage) as percentage
+    FROM analytics_client_versions WHERE date = (SELECT MAX(date) FROM analytics_client_versions)
+    GROUP BY version ORDER BY user_count DESC
+  `,
+    )
+    .all() as Array<{ version: string; user_count: number; percentage: number }>;
+}
+
+export function getUsersByClientVersion(): Record<string, Array<{ email: string; name: string }>> {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `
+    WITH latest_version AS (
+      SELECT email, client_version, ROW_NUMBER() OVER (PARTITION BY email ORDER BY date DESC) as rn
+      FROM daily_usage
+      WHERE client_version IS NOT NULL AND client_version != ''
+    )
+    SELECT lv.client_version as version, lv.email, COALESCE(m.name, lv.email) as name
+    FROM latest_version lv
+    LEFT JOIN members m ON m.email = lv.email
+    WHERE lv.rn = 1
+    ORDER BY lv.client_version, m.name
+  `,
+    )
+    .all() as Array<{ version: string; email: string; name: string }>;
+
+  const result: Record<string, Array<{ email: string; name: string }>> = {};
+  for (const row of rows) {
+    const arr = (result[row.version] ??= []);
+    arr.push({ email: row.email, name: row.name });
+  }
+  return result;
+}
+
+export function getModelEfficiency(emails?: string[]): ModelEfficiency[] {
+  const db = getDb();
+  const emailFilter = emails?.length ? `AND du.email IN (${emails.map(() => "?").join(",")})` : "";
+  const params = emails?.length ? [...emails] : [];
+
+  return db
+    .prepare(
+      `
+    SELECT
+      du.most_used_model as model,
+      COUNT(DISTINCT du.email) as users,
+      ROUND(SUM(ds.spend_cents) / 100.0, 2) as total_spend_usd,
+      SUM(du.agent_requests) as total_reqs,
+      SUM(du.lines_added) as total_generated,
+      SUM(du.accepted_lines_added) as total_accepted,
+      SUM(du.lines_added) - SUM(du.accepted_lines_added) as total_wasted,
+      ROUND(SUM(du.accepted_lines_added) * 100.0 / NULLIF(SUM(du.lines_added), 0), 1) as precision_pct,
+      ROUND(SUM(du.accepted_lines_added) * 1.0 / NULLIF(SUM(du.agent_requests), 0), 1) as useful_lines_per_req,
+      ROUND((SUM(du.lines_added) - SUM(du.accepted_lines_added)) * 1.0 / NULLIF(SUM(du.agent_requests), 0), 1) as wasted_lines_per_req,
+      ROUND(SUM(du.total_rejects) * 100.0 / NULLIF(SUM(du.total_accepts) + SUM(du.total_rejects), 0), 1) as rejection_rate,
+      CASE WHEN SUM(du.agent_requests) > 0
+        THEN ROUND(SUM(ds.spend_cents) / 100.0 / SUM(du.agent_requests), 2)
+        ELSE 0 END as cost_per_req,
+      CASE WHEN SUM(du.accepted_lines_added) > 0
+        THEN ROUND(SUM(ds.spend_cents) / 100.0 / SUM(du.accepted_lines_added), 4)
+        ELSE 0 END as cost_per_useful_line
+    FROM daily_usage du
+    JOIN (
+      SELECT date, email, MAX(spend_cents) as spend_cents
+      FROM daily_spend ${emails?.length ? `WHERE email IN (${emails.map(() => "?").join(",")})` : ""} GROUP BY date, email
+    ) ds ON du.email = ds.email AND du.date = ds.date
+    WHERE du.is_active = 1
+      AND du.most_used_model != ''
+      AND du.agent_requests > 0
+      AND ds.spend_cents > 0
+      ${emailFilter}
+    GROUP BY du.most_used_model
+    HAVING COUNT(DISTINCT du.email) >= ${emails?.length ? "1" : "3"} AND SUM(ds.spend_cents) >= ${emails?.length ? "0" : "2000"}
+    ORDER BY total_spend_usd DESC`,
+    )
+    .all(...params, ...params) as ModelEfficiency[];
+}
+
+export function getAllMembers(): Array<TeamMember & { first_seen: string; last_seen: string }> {
+  const db = getDb();
+  return db.prepare("SELECT * FROM members ORDER BY name").all() as Array<
+    TeamMember & { first_seen: string; last_seen: string }
+  >;
+}
+
+export function upsertUsageEvents(events: FilteredUsageEvent[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO usage_events (user_email, timestamp, model, kind, max_mode, requests_cost_cents,
+      total_cents, total_tokens, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+      is_chargeable, is_headless)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const tx = db.transaction(() => {
+    for (const e of events) {
+      const email = e.userEmail?.trim();
+      if (!email) continue;
+      const tu = e.tokenUsage;
+      stmt.run(
+        email,
+        e.timestamp,
+        e.model,
+        e.kind,
+        e.maxMode ? 1 : 0,
+        e.requestsCosts,
+        tu?.totalCents ?? 0,
+        (tu?.inputTokens ?? 0) + (tu?.outputTokens ?? 0),
+        tu?.inputTokens ?? 0,
+        tu?.outputTokens ?? 0,
+        tu?.cacheReadTokens ?? 0,
+        tu?.cacheWriteTokens ?? 0,
+        e.isChargeable ? 1 : 0,
+        e.isHeadless ? 1 : 0,
+      );
+    }
+  });
+  tx();
+}
+
+export function getUserUsageEventsSummary(
+  email: string,
+  days: number = 30,
+  billingCycleStart?: string | null,
+): Array<{
+  model: string;
+  requests: number;
+  total_cost_cents: number;
+  avg_cost_cents: number;
+  plan_reqs: number;
+  plan_cost_cents: number;
+  overage_reqs: number;
+  overage_cost_cents: number;
+  error_reqs: number;
+  max_mode_reqs: number;
+  avg_cache_read_tokens: number;
+}> {
+  const db = getDb();
+  const rollingSince = Date.now() - days * 24 * 60 * 60 * 1000;
+  const since = billingCycleStart
+    ? new Date(`${billingCycleStart}T12:00:00.000Z`).getTime()
+    : rollingSince;
+  return db
+    .prepare(
+      `
+    SELECT model,
+      COUNT(*) as requests,
+      SUM(total_cents) as total_cost_cents,
+      ROUND(AVG(total_cents), 2) as avg_cost_cents,
+      SUM(CASE WHEN kind LIKE 'Included%' THEN 1 ELSE 0 END) as plan_reqs,
+      SUM(CASE WHEN kind LIKE 'Included%' THEN total_cents ELSE 0 END) as plan_cost_cents,
+      SUM(CASE WHEN kind = 'Usage-based' THEN 1 ELSE 0 END) as overage_reqs,
+      SUM(CASE WHEN kind = 'Usage-based' THEN total_cents ELSE 0 END) as overage_cost_cents,
+      SUM(CASE WHEN kind LIKE 'Errored%' THEN 1 ELSE 0 END) as error_reqs,
+      SUM(CASE WHEN max_mode = 1 THEN 1 ELSE 0 END) as max_mode_reqs,
+      ROUND(AVG(cache_read_tokens)) as avg_cache_read_tokens
+    FROM usage_events
+    WHERE user_email = ? AND CAST(timestamp AS INTEGER) >= ?
+    GROUP BY model
+    HAVING SUM(total_cents) > 0 OR COUNT(*) >= 5
+    ORDER BY total_cost_cents DESC
+  `,
+    )
+    .all(email, since) as Array<{
+    model: string;
+    requests: number;
+    total_cost_cents: number;
+    avg_cost_cents: number;
+    plan_reqs: number;
+    plan_cost_cents: number;
+    overage_reqs: number;
+    overage_cost_cents: number;
+    error_reqs: number;
+    max_mode_reqs: number;
+    avg_cache_read_tokens: number;
+  }>;
+}
+
+export function getUserContextMetrics(email: string, days: number = 30): UserContextMetrics | null {
+  const db = getDb();
+  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+
+  const userRow = db
+    .prepare(
+      `SELECT ROUND(AVG(cache_read_tokens)) as avg_cr, ROUND(AVG(cache_write_tokens)) as avg_cw,
+        COUNT(*) as reqs
+       FROM usage_events
+       WHERE user_email = ? AND CAST(timestamp AS INTEGER) >= ? AND cache_read_tokens > 0`,
+    )
+    .get(email, since) as
+    | { avg_cr: number | null; avg_cw: number | null; reqs: number }
+    | undefined;
+
+  if (!userRow || !userRow.reqs) return null;
+
+  const teamRows = db
+    .prepare(
+      `SELECT user_email, ROUND(AVG(cache_read_tokens)) as avg_cr
+       FROM usage_events
+       WHERE CAST(timestamp AS INTEGER) >= ? AND cache_read_tokens > 0
+       GROUP BY user_email
+       HAVING COUNT(*) >= 10
+       ORDER BY avg_cr`,
+    )
+    .all(since) as Array<{ user_email: string; avg_cr: number }>;
+
+  const teamAvgs = teamRows.map((r) => r.avg_cr).sort((a, b) => a - b);
+  const teamAvgCacheRead =
+    teamAvgs.length > 0 ? Math.round(teamAvgs.reduce((s, v) => s + v, 0) / teamAvgs.length) : 0;
+  const teamMedianCacheRead =
+    teamAvgs.length > 0 ? (teamAvgs[Math.floor(teamAvgs.length / 2)] ?? 0) : 0;
+
+  const userAvg = userRow.avg_cr ?? 0;
+  const contextRank = teamAvgs.filter((v) => v >= userAvg).length;
+  const totalRanked = teamAvgs.length;
+
+  const LONG_SESSION_THRESHOLD = 700_000;
+  const SHORT_SESSION_THRESHOLD = 300_000;
+  let contextBadge: ContextBadge | null = null;
+  if (userRow.reqs >= 30 && userAvg > LONG_SESSION_THRESHOLD) {
+    contextBadge = "long-sessions";
+  } else if (userRow.reqs >= 30 && userAvg > 0 && userAvg < SHORT_SESSION_THRESHOLD) {
+    contextBadge = "short-sessions";
+  }
+
+  return {
+    avgCacheRead: Math.round(userAvg),
+    avgCacheWrite: Math.round(userRow.avg_cw ?? 0),
+    totalRequests: userRow.reqs,
+    teamAvgCacheRead,
+    teamMedianCacheRead,
+    contextRank,
+    totalRanked,
+    contextBadge,
+  };
+}
+
+export function getUsageEventsLastTimestamp(): string | null {
+  const db = getDb();
+  const row = db.prepare("SELECT MAX(timestamp) as ts FROM usage_events").get() as {
+    ts: string | null;
+  };
+  return row?.ts ?? null;
+}
+
+export function upsertAnalyticsCommands(entries: AnalyticsCommandsEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_commands (date, command_name, usage)
+    VALUES (?, ?, ?)
+    ON CONFLICT(date, command_name) DO UPDATE SET
+      usage = excluded.usage, collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) stmt.run(e.event_date, e.command_name, e.usage);
+  });
+  tx();
+}
+
+export function getAnalyticsCommandsSummary(
+  days: number = 30,
+  emails?: string[],
+): Array<{ command_name: string; total_usage: number }> {
+  const db = getDb();
+  if (emails?.length) {
+    const placeholders = emails.map(() => "?").join(",");
+    return db
+      .prepare(
+        `SELECT command_name, SUM(usage) as total_usage
+         FROM analytics_user_commands WHERE date >= date('now', ?) AND email IN (${placeholders})
+         GROUP BY command_name ORDER BY total_usage DESC`,
+      )
+      .all(`-${days} days`, ...emails) as Array<{ command_name: string; total_usage: number }>;
+  }
+  return db
+    .prepare(
+      `
+    SELECT command_name, SUM(usage) as total_usage
+    FROM analytics_commands WHERE date >= date('now', ?)
+    GROUP BY command_name ORDER BY total_usage DESC
+  `,
+    )
+    .all(`-${days} days`) as Array<{ command_name: string; total_usage: number }>;
+}
+
+export function upsertAnalyticsPlans(entries: AnalyticsPlansEntry[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_plans (date, model, usage)
+    VALUES (?, ?, ?)
+    ON CONFLICT(date, model) DO UPDATE SET
+      usage = excluded.usage, collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) stmt.run(e.event_date, e.model, e.usage);
+  });
+  tx();
+}
+
+export function upsertAnalyticsUserMCP(
+  entries: Array<{
+    date: string;
+    email: string;
+    tool_name: string;
+    server_name: string;
+    usage: number;
+  }>,
+): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_user_mcp (date, email, tool_name, server_name, usage)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(date, email, tool_name, server_name) DO UPDATE SET
+      usage = excluded.usage, collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) stmt.run(e.date, e.email, e.tool_name, e.server_name, e.usage);
+  });
+  tx();
+}
+
+export function upsertAnalyticsUserCommands(
+  entries: Array<{ date: string; email: string; command_name: string; usage: number }>,
+): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO analytics_user_commands (date, email, command_name, usage)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(date, email, command_name) DO UPDATE SET
+      usage = excluded.usage, collected_at = datetime('now')
+  `);
+  const tx = db.transaction(() => {
+    for (const e of entries) stmt.run(e.date, e.email, e.command_name, e.usage);
+  });
+  tx();
+}
+
+export function upsertAICodeCommits(commits: AICodeCommit[]): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO ai_code_commits (email, date, repo_name, commits, total_lines_added, total_lines_deleted,
+      tab_lines_added, tab_lines_deleted, composer_lines_added, composer_lines_deleted,
+      non_ai_lines_added, non_ai_lines_deleted)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(email, date, repo_name) DO UPDATE SET
+      commits = ai_code_commits.commits + excluded.commits,
+      total_lines_added = ai_code_commits.total_lines_added + excluded.total_lines_added,
+      total_lines_deleted = ai_code_commits.total_lines_deleted + excluded.total_lines_deleted,
+      tab_lines_added = ai_code_commits.tab_lines_added + excluded.tab_lines_added,
+      tab_lines_deleted = ai_code_commits.tab_lines_deleted + excluded.tab_lines_deleted,
+      composer_lines_added = ai_code_commits.composer_lines_added + excluded.composer_lines_added,
+      composer_lines_deleted = ai_code_commits.composer_lines_deleted + excluded.composer_lines_deleted,
+      non_ai_lines_added = ai_code_commits.non_ai_lines_added + excluded.non_ai_lines_added,
+      non_ai_lines_deleted = ai_code_commits.non_ai_lines_deleted + excluded.non_ai_lines_deleted,
+      collected_at = datetime('now')
+  `);
+
+  const grouped = new Map<
+    string,
+    {
+      email: string;
+      date: string;
+      repo: string;
+      commits: number;
+      tla: number;
+      tld: number;
+      tab_a: number;
+      tab_d: number;
+      comp_a: number;
+      comp_d: number;
+      non_a: number;
+      non_d: number;
+    }
+  >();
+
+  for (const c of commits) {
+    const date = c.commitTs.slice(0, 10);
+    const repo = c.repoName || "";
+    const key = `${c.userEmail}:${date}:${repo}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.commits++;
+      existing.tla += c.totalLinesAdded;
+      existing.tld += c.totalLinesDeleted;
+      existing.tab_a += c.tabLinesAdded;
+      existing.tab_d += c.tabLinesDeleted;
+      existing.comp_a += c.composerLinesAdded;
+      existing.comp_d += c.composerLinesDeleted;
+      existing.non_a += c.nonAiLinesAdded;
+      existing.non_d += c.nonAiLinesDeleted;
+    } else {
+      grouped.set(key, {
+        email: c.userEmail,
+        date,
+        repo,
+        commits: 1,
+        tla: c.totalLinesAdded,
+        tld: c.totalLinesDeleted,
+        tab_a: c.tabLinesAdded,
+        tab_d: c.tabLinesDeleted,
+        comp_a: c.composerLinesAdded,
+        comp_d: c.composerLinesDeleted,
+        non_a: c.nonAiLinesAdded,
+        non_d: c.nonAiLinesDeleted,
+      });
+    }
+  }
+
+  const clearStmt = db.prepare(`
+    DELETE FROM ai_code_commits WHERE email = ? AND date = ? AND repo_name = ?
+  `);
+
+  const tx = db.transaction(() => {
+    for (const g of grouped.values()) {
+      clearStmt.run(g.email, g.date, g.repo);
+      stmt.run(
+        g.email,
+        g.date,
+        g.repo,
+        g.commits,
+        g.tla,
+        g.tld,
+        g.tab_a,
+        g.tab_d,
+        g.comp_a,
+        g.comp_d,
+        g.non_a,
+        g.non_d,
+      );
+    }
+  });
+  tx();
+}
+
+export function getRepoAIAttribution(
+  days: number = 30,
+  emails?: string[],
+): Array<{
+  repo_name: string;
+  commits: number;
+  total_lines: number;
+  tab_lines: number;
+  composer_lines: number;
+  non_ai_lines: number;
+  ai_pct: number;
+}> {
+  const db = getDb();
+  const emailFilter = emails?.length ? `AND email IN (${emails.map(() => "?").join(",")})` : "";
+  const params = emails?.length ? [`-${days} days`, ...emails] : [`-${days} days`];
+  return db
+    .prepare(
+      `SELECT repo_name,
+        SUM(commits) as commits,
+        SUM(total_lines_added) as total_lines,
+        SUM(tab_lines_added) as tab_lines,
+        SUM(composer_lines_added) as composer_lines,
+        SUM(non_ai_lines_added) as non_ai_lines,
+        CASE WHEN SUM(total_lines_added) > 0
+          THEN ROUND(100.0 * (SUM(tab_lines_added) + SUM(composer_lines_added)) / SUM(total_lines_added))
+          ELSE 0 END as ai_pct
+      FROM ai_code_commits
+      WHERE date >= date('now', ?) AND repo_name != '' ${emailFilter}
+      GROUP BY repo_name
+      ORDER BY total_lines DESC
+      LIMIT 15`,
+    )
+    .all(...params) as Array<{
+    repo_name: string;
+    commits: number;
+    total_lines: number;
+    tab_lines: number;
+    composer_lines: number;
+    non_ai_lines: number;
+    ai_pct: number;
+  }>;
+}
+
+export function getUserRepoBreakdown(
+  email: string,
+  days: number = 30,
+): Array<{
+  repo_name: string;
+  commits: number;
+  total_lines: number;
+  tab_lines: number;
+  composer_lines: number;
+  non_ai_lines: number;
+  ai_pct: number;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT repo_name,
+        SUM(commits) as commits,
+        SUM(total_lines_added) as total_lines,
+        SUM(tab_lines_added) as tab_lines,
+        SUM(composer_lines_added) as composer_lines,
+        SUM(non_ai_lines_added) as non_ai_lines,
+        CASE WHEN SUM(total_lines_added) > 0
+          THEN ROUND(100.0 * (SUM(tab_lines_added) + SUM(composer_lines_added)) / SUM(total_lines_added))
+          ELSE 0 END as ai_pct
+      FROM ai_code_commits
+      WHERE email = ? AND date >= date('now', ?) AND repo_name != ''
+      GROUP BY repo_name
+      ORDER BY total_lines DESC`,
+    )
+    .all(email, `-${days} days`) as Array<{
+    repo_name: string;
+    commits: number;
+    total_lines: number;
+    tab_lines: number;
+    composer_lines: number;
+    non_ai_lines: number;
+    ai_pct: number;
+  }>;
+}
+
+export function getUserAIAdoption(
+  email: string,
+  days: number = 30,
+): {
+  score: number;
+  adoptionTier: string;
+  acceptRate: number;
+  intensity: number;
+  intensityNorm: number;
+  consistency: number;
+  agentRequests: number;
+  totalAccepts: number;
+  totalApplies: number;
+  activeDays: number;
+  periodDays: number;
+  commitData: {
+    totalCommits: number;
+    totalLinesAdded: number;
+    aiLinesAdded: number;
+    composerLinesAdded: number;
+    tabLinesAdded: number;
+    nonAiLinesAdded: number;
+    aiPercent: number;
+  } | null;
+} | null {
+  const db = getDb();
+  const dateFilter = `-${days} days`;
+
+  const userRow = db
+    .prepare(
+      `SELECT
+        SUM(agent_requests) as agent_reqs,
+        SUM(total_applies) as applies,
+        SUM(total_accepts) as accepts,
+        COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days
+      FROM daily_usage WHERE email = ? AND date >= date('now', ?) AND is_active = 1`,
+    )
+    .get(email, dateFilter) as {
+    agent_reqs: number | null;
+    applies: number | null;
+    accepts: number | null;
+    active_days: number | null;
+  };
+
+  if (!userRow?.agent_reqs || userRow.agent_reqs < 10) return null;
+
+  const teamP90 = db
+    .prepare(
+      `SELECT reqs_per_day FROM (
+        SELECT SUM(agent_requests) * 1.0 / COUNT(CASE WHEN is_active = 1 THEN 1 END) as reqs_per_day
+        FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1
+        GROUP BY email HAVING SUM(agent_requests) >= 10
+        ORDER BY reqs_per_day
+      ) sub
+      LIMIT 1 OFFSET (SELECT CAST(COUNT(*) * 0.9 AS INTEGER) FROM (
+        SELECT email FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1
+        GROUP BY email HAVING SUM(agent_requests) >= 10
+      ))`,
+    )
+    .get(dateFilter, dateFilter) as { reqs_per_day: number } | undefined;
+
+  const p90Intensity = teamP90?.reqs_per_day ?? 50;
+  const activeDays = userRow.active_days ?? 0;
+  const applies = userRow.applies ?? 0;
+  const accepts = userRow.accepts ?? 0;
+  const agentReqs = userRow.agent_reqs ?? 0;
+
+  const elapsedRow = db
+    .prepare(
+      `SELECT CAST(julianday('now') - julianday(MIN(date)) AS INTEGER) + 1 as elapsed
+       FROM daily_usage WHERE date >= date('now', ?) AND is_active = 1`,
+    )
+    .get(dateFilter) as { elapsed: number | null } | undefined;
+  const periodDays = Math.min(days, elapsedRow?.elapsed ?? days);
+
+  const acceptRate = applies > 0 ? accepts / applies : 0;
+  const intensity = activeDays > 0 ? agentReqs / activeDays : 0;
+  const intensityNorm = Math.min(intensity / p90Intensity, 1);
+  const consistency = periodDays > 0 ? activeDays / periodDays : 0;
+
+  const score = Math.round((acceptRate * 40 + intensityNorm * 40 + consistency * 20) * 10) / 10;
+
+  let tier: string;
+  if (score >= 80) tier = "AI-Native";
+  else if (score >= 55) tier = "High Adoption";
+  else if (score >= 30) tier = "Moderate";
+  else if (score >= 10) tier = "Low Adoption";
+  else tier = "Manual";
+
+  const commitRow = db
+    .prepare(
+      `SELECT SUM(commits) as c, SUM(total_lines_added) as tla,
+        SUM(tab_lines_added) as tab, SUM(composer_lines_added) as comp,
+        SUM(non_ai_lines_added) as nonai
+      FROM ai_code_commits WHERE email = ? AND date >= date('now', ?)`,
+    )
+    .get(email, dateFilter) as {
+    c: number | null;
+    tla: number | null;
+    tab: number | null;
+    comp: number | null;
+    nonai: number | null;
+  };
+
+  const commitData =
+    commitRow?.c && commitRow.c >= 5
+      ? {
+          totalCommits: commitRow.c,
+          totalLinesAdded: commitRow.tla ?? 0,
+          aiLinesAdded: (commitRow.tab ?? 0) + (commitRow.comp ?? 0),
+          composerLinesAdded: commitRow.comp ?? 0,
+          tabLinesAdded: commitRow.tab ?? 0,
+          nonAiLinesAdded: commitRow.nonai ?? 0,
+          aiPercent:
+            (commitRow.tla ?? 0) > 0
+              ? Math.round(
+                  (((commitRow.tab ?? 0) + (commitRow.comp ?? 0)) / (commitRow.tla ?? 1)) * 1000,
+                ) / 10
+              : 0,
+        }
+      : null;
+
+  return {
+    score,
+    adoptionTier: tier,
+    acceptRate: Math.round(acceptRate * 1000) / 10,
+    intensity: Math.round(intensity * 10) / 10,
+    intensityNorm: Math.round(intensityNorm * 1000) / 10,
+    consistency: Math.round(consistency * 1000) / 10,
+    agentRequests: agentReqs,
+    totalAccepts: accepts,
+    totalApplies: applies,
+    activeDays,
+    periodDays,
+    commitData,
+  };
+}
+
+export function getUserMCPSummary(
+  email: string,
+  days: number = 30,
+): Array<{ tool_name: string; server_name: string; total_usage: number }> {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+    SELECT tool_name, server_name, SUM(usage) as total_usage
+    FROM analytics_user_mcp WHERE email = ? AND date >= date('now', ?)
+    GROUP BY tool_name, server_name ORDER BY total_usage DESC
+  `,
+    )
+    .all(email, `-${days} days`) as Array<{
+    tool_name: string;
+    server_name: string;
+    total_usage: number;
+  }>;
+}
+
+export function getUserCommandsSummary(
+  email: string,
+  days: number = 30,
+): Array<{ command_name: string; total_usage: number }> {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+    SELECT command_name, SUM(usage) as total_usage
+    FROM analytics_user_commands WHERE email = ? AND date >= date('now', ?)
+    GROUP BY command_name ORDER BY total_usage DESC
+  `,
+    )
+    .all(email, `-${days} days`) as Array<{ command_name: string; total_usage: number }>;
+}
+
+export function getAnalyticsPlansSummary(
+  days: number = 30,
+): Array<{ model: string; total_usage: number }> {
+  const db = getDb();
+  return db
+    .prepare(
+      `
+    SELECT model, SUM(usage) as total_usage
+    FROM analytics_plans WHERE date >= date('now', ?)
+    GROUP BY model ORDER BY total_usage DESC
+  `,
+    )
+    .all(`-${days} days`) as Array<{ model: string; total_usage: number }>;
+}
+
+export function getPlanExhaustionStats(emails?: string[]): {
+  summary: {
+    users_exhausted: number;
+    total_active: number;
+    avg_days: number;
+    median_days: number;
+    pct_exhausted: number;
+  };
+  users: Array<{
+    email: string;
+    name: string;
+    days_to_exhaust: number;
+    usage_based_reqs: number;
+  }>;
+} {
+  const db = getDb();
+  const cycleRow = db.prepare("SELECT MAX(cycle_start) as cs FROM spending").get() as {
+    cs: string | null;
+  };
+  const cycleStart = cycleRow?.cs;
+  if (!cycleStart)
+    return {
+      summary: {
+        users_exhausted: 0,
+        total_active: 0,
+        avg_days: 0,
+        median_days: 0,
+        pct_exhausted: 0,
+      },
+      users: [],
+    };
+
+  const emailFilter = emails?.length ? `AND du.email IN (${emails.map(() => "?").join(",")})` : "";
+  const emailParams = emails?.length ? [...emails] : [];
+
+  const users = db
+    .prepare(
+      `SELECT du.email, MAX(m.name) as name,
+         CAST(julianday(MIN(du.date)) - julianday(?) + 1 AS INT) as days_to_exhaust,
+         SUM(du.usage_based_reqs) as usage_based_reqs
+       FROM daily_usage du
+       LEFT JOIN members m ON du.email = m.email
+       WHERE du.date >= ? AND du.usage_based_reqs > 0 ${emailFilter}
+       GROUP BY du.email
+       ORDER BY days_to_exhaust ASC`,
+    )
+    .all(cycleStart, cycleStart, ...emailParams) as Array<{
+    email: string;
+    name: string;
+    days_to_exhaust: number;
+    usage_based_reqs: number;
+  }>;
+
+  const emailFilterSimple = emails?.length
+    ? `AND email IN (${emails.map(() => "?").join(",")})`
+    : "";
+
+  const totalActive = (
+    db
+      .prepare(
+        `SELECT COUNT(DISTINCT email) as total FROM daily_usage WHERE date >= ? AND agent_requests > 0 ${emailFilterSimple}`,
+      )
+      .get(cycleStart, ...emailParams) as { total: number }
+  ).total;
+
+  const days = users.map((u) => u.days_to_exhaust).sort((a, b) => a - b);
+  const median = days.length > 0 ? (days[Math.floor(days.length / 2)] ?? 0) : 0;
+  const avg =
+    days.length > 0 ? Math.round((days.reduce((s, d) => s + d, 0) / days.length) * 10) / 10 : 0;
+
+  return {
+    summary: {
+      users_exhausted: users.length,
+      total_active: totalActive,
+      avg_days: avg,
+      median_days: median,
+      pct_exhausted: totalActive > 0 ? Math.round((users.length / totalActive) * 100) : 0,
+    },
+    users,
+  };
+}
+
+export function getLatestCycleSpenders(): Array<{
+  email: string;
+  name: string;
+  spend_cents: number;
+  included_spend_cents: number;
+  fast_premium_requests: number;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT email, name, spend_cents, included_spend_cents, fast_premium_requests
+       FROM spending WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)`,
+    )
+    .all() as Array<{
+    email: string;
+    name: string;
+    spend_cents: number;
+    included_spend_cents: number;
+    fast_premium_requests: number;
+  }>;
+}
+
+export function getActiveDailyUsage(date: string): Array<{
+  email: string;
+  agent_requests: number;
+  usage_based_reqs: number;
+  most_used_model: string;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT email, agent_requests, usage_based_reqs, most_used_model
+       FROM daily_usage
+       WHERE date = ? AND is_active = 1`,
+    )
+    .all(date) as Array<{
+    email: string;
+    agent_requests: number;
+    usage_based_reqs: number;
+    most_used_model: string;
+  }>;
+}
+
+export function getLatestCycleStart(): string | null {
+  const db = getDb();
+  const row = db.prepare("SELECT MAX(cycle_start) as cs FROM spending").get() as {
+    cs: string | null;
+  };
+  return row?.cs ?? null;
+}
+
+export function getPlanExhaustedUsers(cycleStart: string): Array<{
+  email: string;
+  name: string | null;
+  exhausted_on: string;
+  total_usage_reqs: number;
+  total_agent_reqs: number;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT du.email, MAX(m.name) as name, MIN(du.date) as exhausted_on,
+         SUM(du.usage_based_reqs) as total_usage_reqs,
+         SUM(du.agent_requests) as total_agent_reqs
+       FROM daily_usage du
+       LEFT JOIN members m ON du.email = m.email
+       WHERE du.date >= ? AND du.usage_based_reqs > 0
+       GROUP BY du.email`,
+    )
+    .all(cycleStart) as Array<{
+    email: string;
+    name: string | null;
+    exhausted_on: string;
+    total_usage_reqs: number;
+    total_agent_reqs: number;
+  }>;
+}
+
+export function getTeamTotalSpendForCycle(): number {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(spend_cents), 0) as total FROM spending
+       WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)`,
+    )
+    .get() as { total: number };
+  return row.total;
+}
+
+export function getDailySpendWithNames(targetDate: string): Array<{
+  email: string;
+  spend_cents: number;
+  name: string;
+  most_used_model: string;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT ds.email, ds.spend_cents,
+              COALESCE(m.name, ds.email) as name,
+              COALESCE(du.most_used_model, '') as most_used_model
+       FROM (SELECT email, MAX(spend_cents) as spend_cents FROM daily_spend WHERE date = ? GROUP BY email) ds
+       LEFT JOIN members m ON ds.email = m.email
+       LEFT JOIN daily_usage du ON ds.email = du.email AND du.date = ?
+       WHERE ds.spend_cents > 0`,
+    )
+    .all(targetDate, targetDate) as Array<{
+    email: string;
+    spend_cents: number;
+    name: string;
+    most_used_model: string;
+  }>;
+}
+
+export function getLatestDailySpendDate(): string | null {
+  const db = getDb();
+  const row = db.prepare("SELECT MAX(date) as d FROM daily_spend").get() as {
+    d: string | null;
+  };
+  return row?.d ?? null;
+}
+
+export function getUserDailySpendHistory(
+  email: string,
+  beforeDate: string,
+  lookbackDays: number,
+): { avg_spend: number | null } {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT AVG(spend) as avg_spend FROM (
+         SELECT email, date, MAX(spend_cents) as spend
+         FROM daily_spend
+         WHERE email = ? AND date < ? AND date >= date(?, ?)
+         GROUP BY email, date
+       )`,
+    )
+    .get(email, beforeDate, beforeDate, `-${lookbackDays} days`) as {
+    avg_spend: number | null;
+  };
+}
+
+export function getUserCostPerRequest(
+  lookbackDays: number,
+): Array<{
+  email: string;
+  name: string;
+  today_spend_cents: number;
+  today_reqs: number;
+  today_cost_per_req: number;
+  today_top_model: string;
+  hist_avg_cost_per_req: number | null;
+  hist_days: number;
+  today_max_mode_reqs: number;
+  today_avg_cache_read: number;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      `WITH today_data AS (
+        SELECT ue.user_email as email,
+          COALESCE(MAX(m.name), ue.user_email) as name,
+          ROUND(SUM(ue.total_cents)) as spend_cents,
+          COUNT(*) as reqs,
+          ROUND(SUM(ue.total_cents) / COUNT(*), 2) as cost_per_req,
+          SUM(CASE WHEN ue.max_mode = 1 THEN 1 ELSE 0 END) as max_mode_reqs,
+          ROUND(AVG(ue.cache_read_tokens)) as avg_cache_read
+        FROM usage_events ue
+        LEFT JOIN members m ON ue.user_email = m.email
+        WHERE date(ue.timestamp/1000, 'unixepoch') = date('now')
+          AND ue.total_cents > 0
+        GROUP BY ue.user_email
+      ),
+      today_model AS (
+        SELECT user_email as email, model, SUM(total_cents) as model_spend
+        FROM usage_events
+        WHERE date(timestamp/1000, 'unixepoch') = date('now') AND total_cents > 0
+        GROUP BY user_email, model
+      ),
+      today_top AS (
+        SELECT email, model FROM today_model
+        WHERE (email, model_spend) IN (
+          SELECT email, MAX(model_spend) FROM today_model GROUP BY email
+        )
+      ),
+      hist_data AS (
+        SELECT user_email as email,
+          ROUND(SUM(total_cents) / COUNT(*), 2) as avg_cost_per_req,
+          COUNT(DISTINCT date(timestamp/1000, 'unixepoch')) as active_days
+        FROM usage_events
+        WHERE date(timestamp/1000, 'unixepoch') < date('now')
+          AND date(timestamp/1000, 'unixepoch') >= date('now', ?)
+          AND total_cents > 0
+        GROUP BY user_email
+        HAVING COUNT(*) >= 10
+      )
+      SELECT td.email, td.name,
+        td.spend_cents as today_spend_cents,
+        td.reqs as today_reqs,
+        td.cost_per_req as today_cost_per_req,
+        COALESCE(tt.model, '') as today_top_model,
+        hd.avg_cost_per_req as hist_avg_cost_per_req,
+        COALESCE(hd.active_days, 0) as hist_days,
+        td.max_mode_reqs as today_max_mode_reqs,
+        td.avg_cache_read as today_avg_cache_read
+      FROM today_data td
+      LEFT JOIN today_top tt ON td.email = tt.email
+      LEFT JOIN hist_data hd ON td.email = hd.email`,
+    )
+    .all(`-${lookbackDays} days`) as Array<{
+    email: string;
+    name: string;
+    today_spend_cents: number;
+    today_reqs: number;
+    today_cost_per_req: number;
+    today_top_model: string;
+    hist_avg_cost_per_req: number | null;
+    hist_days: number;
+    today_max_mode_reqs: number;
+    today_avg_cache_read: number;
+  }>;
+}
+
+export function getCycleSpendWithModels(): Array<{
+  email: string;
+  name: string;
+  spend_cents: number;
+  fast_premium_requests: number;
+  most_used_model: string;
+}> {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT s.email, s.name, s.spend_cents, s.fast_premium_requests,
+              COALESCE(du.most_used_model, '') as most_used_model
+       FROM spending s
+       LEFT JOIN (
+         SELECT d.email, d.most_used_model FROM daily_usage d
+         INNER JOIN (
+           SELECT email, MAX(date) as max_date FROM daily_usage WHERE is_active = 1 GROUP BY email
+         ) latest ON d.email = latest.email AND d.date = latest.max_date
+         WHERE d.is_active = 1
+       ) du ON s.email = du.email
+       WHERE s.cycle_start = (SELECT MAX(cycle_start) FROM spending)
+         AND s.spend_cents > 0`,
+    )
+    .all() as Array<{
+    email: string;
+    name: string;
+    spend_cents: number;
+    fast_premium_requests: number;
+    most_used_model: string;
+  }>;
+}
+
+export interface CostDriverSummary {
+  thinking_pct: number;
+  max_pct: number;
+  thinking_spend_cents: number;
+  max_spend_cents: number;
+  total_spend_cents: number;
+  top_model: string;
+}
+
+export function getUserCostDrivers(email: string, date?: string): CostDriverSummary | null {
+  const db = getDb();
+  const dateFilterUe = date
+    ? `date(ue.timestamp/1000, 'unixepoch') = ?`
+    : `date(ue.timestamp/1000, 'unixepoch') = date('now')`;
+  const dateFilter = date
+    ? `date(timestamp/1000, 'unixepoch') = ?`
+    : `date(timestamp/1000, 'unixepoch') = date('now')`;
+  const params = date ? [email, date] : [email];
+  const row = db
+    .prepare(
+      `SELECT
+        ROUND(100.0 * SUM(CASE WHEN ue.model LIKE '%thinking%' THEN 1 ELSE 0 END) / COUNT(*)) as thinking_pct,
+        ROUND(100.0 * SUM(CASE WHEN ue.max_mode = 1 THEN 1 ELSE 0 END) / COUNT(*)) as max_pct,
+        ROUND(SUM(CASE WHEN ue.model LIKE '%thinking%' THEN ue.total_cents ELSE 0 END)) as thinking_spend_cents,
+        ROUND(SUM(CASE WHEN ue.max_mode = 1 THEN ue.total_cents ELSE 0 END)) as max_spend_cents,
+        ROUND(SUM(ue.total_cents)) as total_spend_cents
+      FROM usage_events ue
+      WHERE ue.user_email = ? AND ${dateFilterUe} AND ue.total_cents > 0`,
+    )
+    .get(...params) as { thinking_pct: number | null; max_pct: number | null; thinking_spend_cents: number; max_spend_cents: number; total_spend_cents: number } | undefined;
+
+  if (!row || !row.total_spend_cents) return null;
+
+  const topModel = db
+    .prepare(
+      `SELECT model, SUM(total_cents) as s FROM usage_events
+       WHERE user_email = ? AND ${dateFilter} AND total_cents > 0
+       GROUP BY model ORDER BY s DESC LIMIT 1`,
+    )
+    .get(...params) as { model: string } | undefined;
+
+  return {
+    thinking_pct: row.thinking_pct ?? 0,
+    max_pct: row.max_pct ?? 0,
+    thinking_spend_cents: row.thinking_spend_cents,
+    max_spend_cents: row.max_spend_cents,
+    total_spend_cents: row.total_spend_cents,
+    top_model: topModel?.model ?? "",
+  };
+}
+
+export function getActiveMembers(): Array<{ email: string; user_id: string | null; name: string }> {
+  const db = getDb();
+  return db
+    .prepare("SELECT email, user_id, name FROM members WHERE is_removed = 0")
+    .all() as Array<{ email: string; user_id: string | null; name: string }>;
+}
+
+export function renameBillingGroup(groupId: string, name: string): void {
+  const db = getDb();
+  db.prepare("UPDATE billing_groups SET name = ? WHERE id = ?").run(name, groupId);
+}
+
+export function createBillingGroup(name: string): string {
+  const db = getDb();
+  const id = `local_${Date.now()}`;
+  db.prepare(
+    "INSERT INTO billing_groups (id, name, member_count, spend_cents) VALUES (?, ?, 0, 0)",
+  ).run(id, name);
+  return id;
+}
+
+export function assignMemberToGroup(email: string, targetGroupId: string): void {
+  const db = getDb();
+  db.prepare("DELETE FROM group_members WHERE email = ?").run(email);
+  db.prepare(
+    "INSERT INTO group_members (group_id, email, joined_at) VALUES (?, ?, datetime('now'))",
+  ).run(targetGroupId, email);
+  db.prepare(
+    "UPDATE billing_groups SET member_count = (SELECT COUNT(*) FROM group_members WHERE group_id = billing_groups.id)",
+  ).run();
+}
+
+export function createBillingGroupWithId(id: string, name: string): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO billing_groups (id, name, member_count, spend_cents) VALUES (?, ?, 0, 0)",
+  ).run(id, name);
+}
+
+export function reassignMemberToGroup(email: string, targetGroupId: string): void {
+  const db = getDb();
+  db.prepare("DELETE FROM group_members WHERE email = ?").run(email);
+  db.prepare(
+    "INSERT INTO group_members (group_id, email, joined_at) VALUES (?, ?, datetime('now'))",
+  ).run(targetGroupId, email);
+}
+
+export function refreshGroupMemberCounts(): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE billing_groups SET member_count = (SELECT COUNT(*) FROM group_members WHERE group_id = billing_groups.id)",
+  ).run();
+}
+
+export function getCycleSummaryData(): CycleSummaryData | null {
+  const db = getDb();
+
+  const cycleStart = getMetadata("cycle_start");
+  const cycleEnd = getMetadata("cycle_end");
+  if (!cycleStart || !cycleEnd) return null;
+
+  const daysRemaining = Math.max(
+    0,
+    Math.ceil((new Date(cycleEnd).getTime() - Date.now()) / 86_400_000),
+  );
+
+  const totalMembers =
+    (db.prepare("SELECT COUNT(*) as c FROM members WHERE is_removed = 0").get() as { c: number })
+      ?.c ?? 0;
+
+  const activeMembers =
+    (
+      db
+        .prepare(
+          "SELECT COUNT(DISTINCT email) as c FROM daily_usage WHERE is_active = 1 AND date >= ?",
+        )
+        .get(cycleStart) as { c: number }
+    )?.c ?? 0;
+
+  const totalSpendCents = (
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(spend_cents), 0) as t FROM (
+          SELECT email, MAX(spend_cents) as spend_cents FROM spending
+          WHERE cycle_start = ? GROUP BY email)`,
+      )
+      .get(cycleStart) as { t: number }
+  ).t;
+
+  const prevCycleRow = db
+    .prepare(
+      `SELECT cycle_start, SUM(spend_cents) as total
+       FROM spending
+       WHERE cycle_start < ?
+       GROUP BY cycle_start
+       ORDER BY cycle_start DESC
+       LIMIT 1`,
+    )
+    .get(cycleStart) as { cycle_start: string; total: number } | undefined;
+
+  const topSpenders = db
+    .prepare(
+      `SELECT COALESCE(m.name, s.email) as name, s.spend_cents as spend
+       FROM spending s LEFT JOIN members m ON s.email = m.email
+       WHERE s.cycle_start = ? AND s.spend_cents > 0
+       ORDER BY s.spend_cents DESC LIMIT 5`,
+    )
+    .all(cycleStart) as Array<{ name: string; spend: number }>;
+
+  const adoptionRows = db
+    .prepare(
+      `WITH cycle_stats AS (
+        SELECT email,
+          SUM(agent_requests) as total_reqs,
+          SUM(total_applies) as total_applies,
+          SUM(total_accepts) as total_accepts,
+          COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days,
+          CAST(julianday(?) - julianday(?) AS INT) as period_days
+        FROM daily_usage
+        WHERE date >= ?
+        GROUP BY email
+        HAVING total_reqs >= 10
+      ),
+      team_p90 AS (
+        SELECT MAX(rpd) as p90 FROM (
+          SELECT total_reqs * 1.0 / active_days as rpd
+          FROM cycle_stats WHERE active_days > 0
+          ORDER BY rpd
+          LIMIT (SELECT MAX(1, CAST(COUNT(*) * 0.9 AS INT)) FROM cycle_stats WHERE active_days > 0)
+        )
+      ),
+      scored AS (
+        SELECT
+          (CASE WHEN cs.total_applies > 0 THEN cs.total_accepts * 100.0 / cs.total_applies ELSE 0 END) * 0.4
+          + (CASE WHEN tp.p90 > 0 AND cs.active_days > 0
+              THEN MIN((cs.total_reqs * 1.0 / cs.active_days) / tp.p90 * 100, 100) ELSE 0 END) * 0.4
+          + (CASE WHEN cs.period_days > 0 THEN cs.active_days * 100.0 / cs.period_days ELSE 0 END) * 0.2
+          as score
+        FROM cycle_stats cs, team_p90 tp
+      )
+      SELECT
+        SUM(CASE WHEN score >= 80 THEN 1 ELSE 0 END) as ai_native,
+        SUM(CASE WHEN score >= 55 AND score < 80 THEN 1 ELSE 0 END) as high,
+        SUM(CASE WHEN score >= 30 AND score < 55 THEN 1 ELSE 0 END) as moderate,
+        SUM(CASE WHEN score >= 10 AND score < 30 THEN 1 ELSE 0 END) as low,
+        SUM(CASE WHEN score < 10 THEN 1 ELSE 0 END) as manual
+      FROM scored`,
+    )
+    .get(cycleEnd, cycleStart, cycleStart) as {
+    ai_native: number;
+    high: number;
+    moderate: number;
+    low: number;
+    manual: number;
+  };
+
+  const planStats = getPlanExhaustionStats();
+
+  return {
+    cycleStart,
+    cycleEnd,
+    daysRemaining,
+    totalSpendDollars: Math.round(totalSpendCents / 100),
+    previousCycleSpendDollars: prevCycleRow ? Math.round(prevCycleRow.total / 100) : null,
+    totalMembers,
+    activeMembers,
+    unusedSeats: totalMembers - activeMembers,
+    planExhausted: {
+      exhausted: planStats.summary.users_exhausted,
+      totalActive: planStats.summary.total_active,
+    },
+    topSpenders: topSpenders.map((t) => ({
+      name: t.name,
+      spendDollars: Math.round(t.spend / 100),
+    })),
+    adoptionTiers: {
+      aiNative: adoptionRows?.ai_native ?? 0,
+      high: adoptionRows?.high ?? 0,
+      moderate: adoptionRows?.moderate ?? 0,
+      low: adoptionRows?.low ?? 0,
+      manual: adoptionRows?.manual ?? 0,
+    },
+  };
+}

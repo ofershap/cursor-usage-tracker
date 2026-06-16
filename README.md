@@ -268,6 +268,32 @@ This runs the stored data through all three detection layers and sends alerts fo
 
 > `npm run collect` only fetches data. `npm run detect` only runs detection. The cron endpoint (`POST /api/cron`) does both in one call.
 
+### Postgres storage (optional)
+
+By default data is stored in a local SQLite file at `data/tracker.db`. For Postgres — with decimal-safe spend columns — set `DATABASE_SOURCE=postgres`.
+
+**Start Postgres in Docker** (no local Postgres install required; uses port **5433** to avoid conflicting with a system Postgres on 5432):
+
+```bash
+npm run postgres:up
+```
+
+Add to `.env`:
+
+```env
+DATABASE_SOURCE=postgres
+POSTGRES_URL=postgres://tracker:tracker@localhost:5433/cursor_tracker
+```
+
+Then collect and run the dashboard against Postgres:
+
+```bash
+npm run collect:postgres   # or npm run collect after updating .env
+npm run dev:postgres       # or npm run dev after updating .env
+```
+
+Schema is created automatically on first connect. For a full Docker stack (app + Postgres), use `docker compose -f docker-compose.full.yml up`.
+
 ### 6. Set up recurring collection
 
 Trigger the cron endpoint hourly (via crontab, GitHub Actions, or any scheduler):
@@ -468,15 +494,15 @@ When both are set, either match grants access. When neither is set, any Google a
 
 ## Tech Stack
 
-| Component  | Technology                                                                                                                                                     |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Framework  | [![Next.js](https://img.shields.io/badge/Next.js-000?logo=nextdotjs&logoColor=white)](https://github.com/vercel/next.js) App Router                            |
-| Language   | [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://github.com/microsoft/TypeScript) strict mode           |
-| Database   | [![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)](https://github.com/WiseLibs/better-sqlite3) via better-sqlite3 (swappable) |
-| Charts     | [![Recharts](https://img.shields.io/badge/Recharts-22B5BF?logo=recharts&logoColor=white)](https://github.com/recharts/recharts)                                |
-| Styling    | [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?logo=tailwindcss&logoColor=white)](https://github.com/tailwindlabs/tailwindcss)              |
-| Testing    | [![Vitest](https://img.shields.io/badge/Vitest-6E9F18?logo=vitest&logoColor=white)](https://github.com/vitest-dev/vitest)                                      |
-| Deployment | [![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)](https://github.com/docker) multi-stage build                               |
+| Component  | Technology                                                                                                                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework  | [![Next.js](https://img.shields.io/badge/Next.js-000?logo=nextdotjs&logoColor=white)](https://github.com/vercel/next.js) App Router                                                         |
+| Language   | [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://github.com/microsoft/TypeScript) strict mode                                        |
+| Database   | SQLite (default) or PostgreSQL via `DATABASE_SOURCE`; SQLite uses [better-sqlite3](https://github.com/WiseLibs/better-sqlite3), Postgres uses [pg](https://github.com/brianc/node-postgres) |
+| Charts     | [![Recharts](https://img.shields.io/badge/Recharts-22B5BF?logo=recharts&logoColor=white)](https://github.com/recharts/recharts)                                                             |
+| Styling    | [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?logo=tailwindcss&logoColor=white)](https://github.com/tailwindlabs/tailwindcss)                                           |
+| Testing    | [![Vitest](https://img.shields.io/badge/Vitest-6E9F18?logo=vitest&logoColor=white)](https://github.com/vitest-dev/vitest)                                                                   |
+| Deployment | [![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)](https://github.com/docker) multi-stage build                                                            |
 
 ---
 

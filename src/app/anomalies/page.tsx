@@ -3,17 +3,21 @@ import { AnomaliesClient } from "./anomalies-client";
 
 export const dynamic = "force-dynamic";
 
+const EMPTY_TIMELINE = {
+  anomalies: [],
+  incidents: [],
+  avgMttdMinutes: null,
+  avgMttiMinutes: null,
+  avgMttrMinutes: null,
+};
+
 export default function AnomaliesPage() {
   let timeline;
   try {
     timeline = getAnomalyTimeline(30);
-  } catch {
-    return (
-      <div className="text-center py-20">
-        <h1 className="text-2xl font-bold mb-4">Anomalies</h1>
-        <p className="text-zinc-400">No data available yet. Run the collector first.</p>
-      </div>
-    );
+  } catch (err) {
+    console.error("[anomalies] getAnomalyTimeline failed:", err);
+    timeline = EMPTY_TIMELINE;
   }
 
   return <AnomaliesClient timeline={timeline} />;

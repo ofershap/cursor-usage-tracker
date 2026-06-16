@@ -18,36 +18,54 @@ import { InsightsClient } from "./insights-client";
 
 export const dynamic = "force-dynamic";
 
-export default function InsightsPage() {
+function safe<T>(label: string, fn: () => T, fallback: T): T {
   try {
-    const data = {
-      dau: getAnalyticsDAU(30),
-      modelSummary: getAnalyticsModelUsageSummary(30),
-      modelTrend: getAnalyticsModelUsageTrend(30),
-      agentEdits: getAnalyticsAgentEditsTrend(30),
-      tabs: getAnalyticsTabsTrend(30),
-      mcp: getAnalyticsMCPSummary(30),
-      commands: getAnalyticsCommandsSummary(30),
-      fileExtensions: getAnalyticsFileExtensionsSummary(30),
-      clientVersions: getAnalyticsClientVersionsSummary(),
-      versionUsers: getUsersByClientVersion(),
-      modelEfficiency: getModelEfficiency(),
-      planExhaustion: getPlanExhaustionStats(),
-      repoAttribution: getRepoAIAttribution(30),
-    };
-
-    const groups = getGroupsWithMembers();
-
-    return <InsightsClient initialData={data} groups={groups} />;
-  } catch {
-    return (
-      <div className="text-center py-20">
-        <h1 className="text-2xl font-bold mb-4">Team Insights</h1>
-        <p className="text-zinc-400 mb-8">
-          No analytics data collected yet. Run the collector first:
-        </p>
-        <code className="bg-zinc-800 px-4 py-2 rounded-lg text-sm">npm run collect</code>
-      </div>
-    );
+    return fn();
+  } catch (err) {
+    console.error(`[insights] ${label} failed:`, err);
+    return fallback;
   }
+}
+
+export default function InsightsPage() {
+  const data = {
+    dau: safe("getAnalyticsDAU", () => getAnalyticsDAU(30), []),
+    modelSummary: safe(
+      "getAnalyticsModelUsageSummary",
+      () => getAnalyticsModelUsageSummary(30),
+      [],
+    ),
+    modelTrend: safe("getAnalyticsModelUsageTrend", () => getAnalyticsModelUsageTrend(30), []),
+    agentEdits: safe("getAnalyticsAgentEditsTrend", () => getAnalyticsAgentEditsTrend(30), []),
+    tabs: safe("getAnalyticsTabsTrend", () => getAnalyticsTabsTrend(30), []),
+    mcp: safe("getAnalyticsMCPSummary", () => getAnalyticsMCPSummary(30), []),
+    commands: safe("getAnalyticsCommandsSummary", () => getAnalyticsCommandsSummary(30), []),
+    fileExtensions: safe(
+      "getAnalyticsFileExtensionsSummary",
+      () => getAnalyticsFileExtensionsSummary(30),
+      [],
+    ),
+    clientVersions: safe(
+      "getAnalyticsClientVersionsSummary",
+      () => getAnalyticsClientVersionsSummary(),
+      [],
+    ),
+    versionUsers: safe("getUsersByClientVersion", () => getUsersByClientVersion(), {}),
+    modelEfficiency: safe("getModelEfficiency", () => getModelEfficiency(), []),
+    planExhaustion: safe("getPlanExhaustionStats", () => getPlanExhaustionStats(), {
+      summary: {
+        users_exhausted: 0,
+        total_active: 0,
+        avg_days: 0,
+        median_days: 0,
+        pct_exhausted: 0,
+      },
+      users: [],
+    }),
+    repoAttribution: safe("getRepoAIAttribution", () => getRepoAIAttribution(30), []),
+  };
+
+  const groups = safe("getGroupsWithMembers", () => getGroupsWithMembers(), []);
+
+  return <InsightsClient initialData={data} groups={groups} />;
 }

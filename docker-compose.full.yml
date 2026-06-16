@@ -1,0 +1,41 @@
+# Full stack: tracker app + Postgres (set DATABASE_SOURCE=postgres in .env)
+services:
+  tracker:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - tracker-data:/app/data
+    env_file:
+      - .env
+    environment:
+      DATABASE_SOURCE: ${DATABASE_SOURCE:-postgres}
+      POSTGRES_URL: ${POSTGRES_URL:-postgres://tracker:tracker@postgres:5432/cursor_tracker}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: tracker
+      POSTGRES_DB: cursor_tracker
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker -d cursor_tracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  tracker-data:
+  postgres-data:
