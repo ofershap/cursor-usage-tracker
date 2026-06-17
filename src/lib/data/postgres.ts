@@ -3185,3 +3185,37 @@ export function getCycleSummaryData(): CycleSummaryData | null {
     },
   };
 }
+
+import { orderResetTables } from "./reset-tables";
+export { RESETTABLE_TABLES, type ResettableTable } from "./reset-tables";
+
+const PG_SEQUENCE_TABLES: Partial<Record<string, string>> = {
+  usage_events: "usage_events_id_seq",
+  anomalies: "anomalies_id_seq",
+  incidents: "incidents_id_seq",
+};
+
+export function resetTables(tables: readonly string[]): Record<string, number> {
+  const db = getDb();
+  const counts: Record<string, number> = {};
+  const ordered = orderResetTables(tables);
+
+  const tx = db.transaction(() => {
+    for (const name of ordered) {
+      const before = (db.prepare(`SELECT COUNT(*) AS c FROM ${name}`).get() as { c: number }).c;
+      counts[name] = before;
+    }
+    for (const name of ordered) {
+      db.prepare(`DELETE FROM ${name}`).run();
+    }
+    for (const name of ordered) {
+      const seq = PG_SEQUENCE_TABLES[name];
+      if (seq) {
+        db.prepare(`ALTER SEQUENCE ${seq} RESTART WITH 1`).run();
+      }
+    }
+  });
+  tx();
+
+  return counts;
+}

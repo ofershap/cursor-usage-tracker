@@ -3531,3 +3531,26 @@ export function getCycleSummaryData(): CycleSummaryData | null {
     },
   };
 }
+
+import { orderResetTables } from "./reset-tables";
+export { RESETTABLE_TABLES, type ResettableTable } from "./reset-tables";
+
+export function resetTables(tables: readonly string[]): Record<string, number> {
+  const db = getDb();
+  const counts: Record<string, number> = {};
+  const ordered = orderResetTables(tables);
+
+  const tx = db.transaction(() => {
+    db.pragma("defer_foreign_keys = ON");
+    for (const name of ordered) {
+      const before = (db.prepare(`SELECT COUNT(*) AS c FROM ${name}`).get() as { c: number }).c;
+      db.prepare(`DELETE FROM ${name}`).run();
+      db.prepare("DELETE FROM sqlite_sequence WHERE name = ?").run(name);
+      counts[name] = before;
+    }
+  });
+  tx();
+
+  db.pragma("wal_checkpoint(TRUNCATE)");
+  return counts;
+}

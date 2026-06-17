@@ -268,6 +268,20 @@ This runs the stored data through all three detection layers and sends alerts fo
 
 > `npm run collect` only fetches data. `npm run detect` only runs detection. The cron endpoint (`POST /api/cron`) does both in one call.
 
+### Reset stored data (optional)
+
+To wipe collected data from the local database — for a fresh start or after testing — use the reset CLI. It deletes rows from selected tables (schema is preserved). Works with SQLite (default) and Postgres (`DATABASE_SOURCE=postgres`).
+
+```bash
+npm run reset -- --list              # show all resettable tables
+npm run reset -- --all               # wipe every table (confirmation prompt)
+npm run reset -- usage_events        # wipe one or more tables
+npm run reset -- --all --yes         # skip confirmation (scripts/CI)
+npm run reset:postgres -- --all      # same, against Postgres
+```
+
+Clearing `metadata` or `config` also removes billing-cycle anchors, alert dedup state, and detection thresholds. After a reset, run `npm run collect` to repopulate from the Cursor API.
+
 ### Postgres storage (optional)
 
 By default data is stored in a local SQLite file at `data/tracker.db`. For Postgres — with decimal-safe spend columns — set `DATABASE_SOURCE=postgres`.
@@ -512,6 +526,7 @@ When both are set, either match grants access. When neither is set, any Google a
 npm run dev          # Start dev server
 npm run collect      # Manual data collection
 npm run detect       # Manual anomaly detection + alerting
+npm run reset        # Clear database tables (see --help)
 npm run typecheck    # Type checking
 npm test             # Run tests
 npm run lint         # Lint + format check

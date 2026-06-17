@@ -96,6 +96,8 @@ export const createBillingGroupWithId = backend.createBillingGroupWithId;
 export const reassignMemberToGroup = backend.reassignMemberToGroup;
 export const refreshGroupMemberCounts = backend.refreshGroupMemberCounts;
 export const getCycleSummaryData = backend.getCycleSummaryData;
+export const resetTables = backend.resetTables;
+export { RESETTABLE_TABLES, type ResettableTable } from "./reset-tables";
 
 export type {
   UsageBadge,

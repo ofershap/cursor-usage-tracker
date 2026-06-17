@@ -19,6 +19,8 @@
     "collect:postgres": "DATABASE_SOURCE=postgres POSTGRES_URL=postgres://tracker:tracker@localhost:5433/cursor_tracker npx tsx --env-file=.env src/lib/cli/collect.ts",
     "detect": "npx tsx --env-file=.env src/lib/cli/detect.ts",
     "detect:postgres": "DATABASE_SOURCE=postgres POSTGRES_URL=postgres://tracker:tracker@localhost:5433/cursor_tracker npx tsx --env-file=.env src/lib/cli/detect.ts",
+    "reset": "npx tsx --env-file=.env src/lib/cli/reset.ts",
+    "reset:postgres": "DATABASE_SOURCE=postgres POSTGRES_URL=postgres://tracker:tracker@localhost:5433/cursor_tracker npx tsx --env-file=.env src/lib/cli/reset.ts",
     "postgres:up": "docker compose -f docker-compose.postgres.yml up -d",
     "postgres:down": "docker compose -f docker-compose.postgres.yml down",
     "dev:postgres": "DATABASE_SOURCE=postgres POSTGRES_URL=postgres://tracker:tracker@localhost:5433/cursor_tracker next dev",

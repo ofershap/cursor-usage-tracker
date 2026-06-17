@@ -38,9 +38,10 @@ Cursor Enterprise APIs → Collector (src/lib/collector.ts) → SQLite (src/lib/
                                                     Dashboard (src/app/ pages)
 ```
 
-Two CLI entry points:
-- `npm run collect` — fetch data from Cursor APIs into SQLite
+Three CLI entry points:
+- `npm run collect` — fetch data from Cursor APIs into the database
 - `npm run detect` — run anomaly detection + alerting on stored data
+- `npm run reset` — clear database tables (per-table or all; see `--help`)
 
 Single cron endpoint `POST /api/cron` does both: collect → detect → alert in one call.
 
@@ -52,6 +53,7 @@ Single cron endpoint `POST /api/cron` does both: collect → detect → alert in
 | `src/lib/cursor-client.ts` | Cursor API client (Admin + Analytics), pagination, rate-limit retry |
 | `src/lib/db.ts` | SQLite schema, all queries, dashboard stats, analytics, user stats |
 | `src/lib/collector.ts` | Data collection pipeline (members, daily usage, spending, events, analytics, groups) |
+| `src/lib/reset.ts` | Database reset orchestrator (per-table or full truncate) |
 | `src/lib/anomaly/detector.ts` | Orchestrator — runs all 3 detection layers, deduplicates |
 | `src/lib/anomaly/thresholds.ts` | Layer 1: static limits (spend, requests, tokens) |
 | `src/lib/anomaly/zscore.ts` | Layer 2: statistical z-score on daily spend vs active team mean |
@@ -97,4 +99,4 @@ members, daily_usage, spending, usage_events, anomalies, incidents, config, coll
 
 - API response shapes may not exactly match the live Cursor API. If real responses differ, update `src/lib/types.ts` and `src/lib/cursor-client.ts`.
 - Trend detection can produce duplicate dedup keys (spend spike + cycle outlier both emit `trend:spend` for same user) — first one wins, second is silently dropped.
-- CLI scripts (`npm run collect`, `npm run detect`) do NOT auto-load `.env` — use `source .env && export CURSOR_ADMIN_API_KEY` or run via the Next.js dev server cron endpoint instead.
+- CLI scripts (`npm run collect`, `npm run detect`, `npm run reset`) load `.env` via `--env-file=.env` when run through npm scripts.
