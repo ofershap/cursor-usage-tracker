@@ -292,12 +292,18 @@ By default data is stored in a local SQLite file at `data/tracker.db`. For Postg
 npm run postgres:up
 ```
 
-Add to `.env`:
+Add to `.env` (copy the Postgres block from `.env.example` and set your password):
 
 ```env
 DATABASE_SOURCE=postgres
-POSTGRES_URL=postgres://tracker:tracker@localhost:5433/cursor_tracker
+POSTGRES_USER=your_user
+POSTGRES_PASSWORD=your_password
+POSTGRES_DB=cursor_tracker
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5433
 ```
+
+Docker Compose and npm scripts read these values from `.env`. You can set `POSTGRES_URL` instead if you prefer a single connection string.
 
 Then collect and run the dashboard against Postgres:
 

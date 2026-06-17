@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { runAsWorker } from "synckit";
+import { getPostgresUrl } from "../postgres-url";
 
 const { Pool, types } = pg;
 
@@ -28,14 +29,7 @@ let initialized = false;
 
 function getPool(): pg.Pool {
   if (pool) return pool;
-  const url = process.env.POSTGRES_URL;
-  if (!url) {
-    throw new Error(
-      "POSTGRES_URL is required when DATABASE_SOURCE=postgres. " +
-        "Example: postgres://tracker:tracker@localhost:5432/cursor_tracker",
-    );
-  }
-  pool = new Pool({ connectionString: url });
+  pool = new Pool({ connectionString: getPostgresUrl() });
   return pool;
 }
 
