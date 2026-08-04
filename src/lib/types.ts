@@ -76,11 +76,21 @@ export interface MemberSpend {
   email: string;
   name: string;
   role: string;
+  // Normalized: total cycle-to-date spend in cents. In the post-2026 API, the
+  // raw `spendCents` field represents only overage above the plan; we override
+  // it here with `overallSpendCents` so downstream consumers keep the old
+  // "cycle total" contract. See `normalizeMemberSpend` in cursor-client.ts.
   spendCents: number;
+  // Normalized: portion covered by the plan = total - overage. Derived from
+  // `overallSpendCents - rawSpendCents` (clamped to >= 0).
   includedSpendCents: number;
   fastPremiumRequests: number;
   monthlyLimitDollars: number | null;
   hardLimitOverrideDollars: number;
+  // Raw fields from the post-2026 API shape, preserved for debugging.
+  overallSpendCents?: number;
+  profilePictureUrl?: string | null;
+  effectivePerUserLimitDollars?: number;
 }
 
 export interface SpendResponse {

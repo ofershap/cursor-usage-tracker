@@ -43,6 +43,49 @@ function bool(v: unknown): boolean {
   return v === true || v === 1 || v === "1";
 }
 
+// Normalizes a /teams/spend member entry across two known API shapes.
+//
+// Old shape (pre-2026): { spendCents: <cycle total>, includedSpendCents: <plan-covered> }
+// New shape (post-2026 — see GH issue #19):
+//   { spendCents: <overage above plan>, overallSpendCents: <cycle total>, ... }
+//
+// Internal contract preserved for downstream code: `spendCents` = total cycle
+// spend, `includedSpendCents` = plan-covered portion (derived if not provided).
+function normalizeMemberSpend(raw: Record<string, unknown>): MemberSpend {
+  const rawSpend = num(raw.spendCents);
+  const overall = typeof raw.overallSpendCents === "number" ? raw.overallSpendCents : undefined;
+  const rawIncluded =
+    typeof raw.includedSpendCents === "number" ? raw.includedSpendCents : undefined;
+
+  // If overall is present we're on the new shape: rawSpend is overage. Otherwise
+  // we fall back to the old shape where rawSpend is the total.
+  const total = overall ?? rawSpend;
+  const overage = overall !== undefined ? rawSpend : 0;
+  const included = rawIncluded ?? Math.max(0, total - overage);
+
+  return {
+    userId: typeof raw.userId === "string" ? raw.userId : "",
+    email: typeof raw.email === "string" ? raw.email : "",
+    name: typeof raw.name === "string" ? raw.name : "",
+    role: typeof raw.role === "string" ? raw.role : "",
+    spendCents: total,
+    includedSpendCents: included,
+    fastPremiumRequests: num(raw.fastPremiumRequests),
+    monthlyLimitDollars:
+      typeof raw.monthlyLimitDollars === "number" ? raw.monthlyLimitDollars : null,
+    hardLimitOverrideDollars: num(raw.hardLimitOverrideDollars),
+    overallSpendCents: overall,
+    profilePictureUrl:
+      typeof raw.profilePictureUrl === "string" || raw.profilePictureUrl === null
+        ? (raw.profilePictureUrl as string | null)
+        : null,
+    effectivePerUserLimitDollars:
+      typeof raw.effectivePerUserLimitDollars === "number"
+        ? raw.effectivePerUserLimitDollars
+        : undefined,
+  };
+}
+
 function normalizeFilteredUsageEvent(raw: Record<string, unknown>): FilteredUsageEvent {
   const tuRaw = raw.tokenUsage ?? raw.token_usage;
   let tokenUsage: FilteredUsageEvent["tokenUsage"];
@@ -95,11 +138,27 @@ export class CursorClient {
       "Content-Type": "application/json",
     };
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (err) {
+      // Node's fetch throws a generic "fetch failed" error and hides the real
+      // network/TLS reason in `error.cause`. Surface it so corporate-proxy
+      // self-signed-cert errors etc. are diagnosable in the collector logs.
+      const cause = err instanceof Error ? (err.cause as Error | undefined) : undefined;
+      const causeMsg = cause?.message ?? "";
+      const code = (cause as { code?: string } | undefined)?.code;
+      const detail = [code, causeMsg].filter(Boolean).join(": ");
+      const baseMsg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        detail ? `${baseMsg} (${method} ${url}) — ${detail}` : `${baseMsg} (${method} ${url})`,
+        { cause: err },
+      );
+    }
 
     if (response.status === 429) {
       const retryAfter = response.headers.get("Retry-After");
@@ -193,7 +252,15 @@ export class CursorClient {
       cycleStart = new Date(data.subscriptionCycleStart).toISOString().split("T")[0] ?? "";
       limitedUsersCount = data.limitedUsersCount ?? 0;
 
-      allMembers.push(...data.teamMemberSpend);
+      for (const raw of data.teamMemberSpend ?? []) {
+        allMembers.push(
+          normalizeMemberSpend(
+            raw && typeof raw === "object" && !Array.isArray(raw)
+              ? (raw as unknown as Record<string, unknown>)
+              : {},
+          ),
+        );
+      }
 
       if (page >= data.totalPages) break;
       page++;

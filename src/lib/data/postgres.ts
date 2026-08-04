@@ -1,5 +1,4 @@
-import Database from "better-sqlite3";
-import path from "node:path";
+import { ensurePostgresSchema, PgDatabase } from "./postgres-bridge";
 import type {
   TeamMember,
   DailyUsage,
@@ -34,22 +33,17 @@ import type {
   CycleSummaryData,
 } from "./types";
 
-const DB_PATH = process.env.DATABASE_PATH ?? path.join(process.cwd(), "data", "tracker.db");
+let dbInstance: PgDatabase | null = null;
 
-let dbInstance: Database.Database | null = null;
-
-export function getDb(): Database.Database {
+export function getDb(): PgDatabase {
   if (!dbInstance) {
-    dbInstance = new Database(DB_PATH);
-    dbInstance.pragma("journal_mode = WAL");
-    dbInstance.pragma("foreign_keys = ON");
-    initSchema(dbInstance);
-    runMigrations(dbInstance);
+    ensurePostgresSchema();
+    dbInstance = new PgDatabase();
   }
   return dbInstance;
 }
 
-function cycleBillingAnchor(db: Database.Database): {
+function cycleBillingAnchor(db: PgDatabase): {
   cycleStart: string;
   cycleStartMs: number;
   teamBilledCents: number;
@@ -62,350 +56,6 @@ function cycleBillingAnchor(db: Database.Database): {
     .prepare("SELECT COALESCE(SUM(spend_cents), 0) as t FROM spending WHERE cycle_start = ?")
     .get(cycleStart) as { t: number };
   return { cycleStart, cycleStartMs, teamBilledCents: t.t };
-}
-
-function initSchema(db: Database.Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS members (
-      email TEXT PRIMARY KEY,
-      user_id TEXT,
-      name TEXT NOT NULL,
-      role TEXT NOT NULL,
-      is_removed INTEGER NOT NULL DEFAULT 0,
-      first_seen TEXT NOT NULL DEFAULT (datetime('now')),
-      last_seen TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS daily_usage (
-      date TEXT NOT NULL,
-      email TEXT NOT NULL,
-      user_id TEXT,
-      is_active INTEGER NOT NULL DEFAULT 0,
-      lines_added INTEGER NOT NULL DEFAULT 0,
-      lines_deleted INTEGER NOT NULL DEFAULT 0,
-      accepted_lines_added INTEGER NOT NULL DEFAULT 0,
-      accepted_lines_deleted INTEGER NOT NULL DEFAULT 0,
-      total_applies INTEGER NOT NULL DEFAULT 0,
-      total_accepts INTEGER NOT NULL DEFAULT 0,
-      total_rejects INTEGER NOT NULL DEFAULT 0,
-      total_tabs_shown INTEGER NOT NULL DEFAULT 0,
-      tabs_accepted INTEGER NOT NULL DEFAULT 0,
-      composer_requests INTEGER NOT NULL DEFAULT 0,
-      chat_requests INTEGER NOT NULL DEFAULT 0,
-      agent_requests INTEGER NOT NULL DEFAULT 0,
-      usage_based_reqs INTEGER NOT NULL DEFAULT 0,
-      most_used_model TEXT,
-      tab_most_used_extension TEXT,
-      client_version TEXT,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, email)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_daily_email ON daily_usage(email);
-    CREATE INDEX IF NOT EXISTS idx_daily_date ON daily_usage(date);
-
-    CREATE TABLE IF NOT EXISTS spending (
-      email TEXT NOT NULL,
-      user_id TEXT,
-      name TEXT,
-      cycle_start TEXT NOT NULL,
-      spend_cents INTEGER NOT NULL DEFAULT 0,
-      included_spend_cents INTEGER NOT NULL DEFAULT 0,
-      fast_premium_requests INTEGER NOT NULL DEFAULT 0,
-      monthly_limit_dollars REAL,
-      hard_limit_override_dollars REAL NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (email, cycle_start)
-    );
-
-    CREATE TABLE IF NOT EXISTS usage_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_email TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      model TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      max_mode INTEGER NOT NULL DEFAULT 0,
-      requests_cost_cents REAL NOT NULL DEFAULT 0,
-      total_cents REAL NOT NULL DEFAULT 0,
-      total_tokens INTEGER NOT NULL DEFAULT 0,
-      input_tokens INTEGER NOT NULL DEFAULT 0,
-      output_tokens INTEGER NOT NULL DEFAULT 0,
-      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
-      is_chargeable INTEGER NOT NULL DEFAULT 1,
-      is_headless INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_events_user_ts ON usage_events(user_email, timestamp);
-    CREATE INDEX IF NOT EXISTS idx_events_ts ON usage_events(timestamp);
-
-    CREATE TABLE IF NOT EXISTS anomalies (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_email TEXT NOT NULL,
-      type TEXT NOT NULL,
-      severity TEXT NOT NULL,
-      metric TEXT NOT NULL,
-      value REAL NOT NULL,
-      threshold REAL NOT NULL,
-      message TEXT NOT NULL,
-      detected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      resolved_at TEXT,
-      alerted_at TEXT,
-      diagnosis_model TEXT,
-      diagnosis_kind TEXT,
-      diagnosis_delta REAL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_anomalies_user ON anomalies(user_email);
-    CREATE INDEX IF NOT EXISTS idx_anomalies_open ON anomalies(resolved_at) WHERE resolved_at IS NULL;
-
-    CREATE TABLE IF NOT EXISTS incidents (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      anomaly_id INTEGER NOT NULL REFERENCES anomalies(id),
-      user_email TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      detected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      alerted_at TEXT,
-      acknowledged_at TEXT,
-      resolved_at TEXT,
-      mttd_minutes REAL,
-      mtti_minutes REAL,
-      mttr_minutes REAL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
-
-    CREATE TABLE IF NOT EXISTS config (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS daily_spend (
-      date TEXT NOT NULL,
-      email TEXT NOT NULL,
-      spend_cents INTEGER NOT NULL DEFAULT 0,
-      cycle_start TEXT NOT NULL,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, email)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_daily_spend_email ON daily_spend(email);
-    CREATE INDEX IF NOT EXISTS idx_daily_spend_date ON daily_spend(date);
-
-    CREATE TABLE IF NOT EXISTS billing_groups (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      member_count INTEGER NOT NULL DEFAULT 0,
-      spend_cents INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS group_members (
-      group_id TEXT NOT NULL,
-      email TEXT NOT NULL,
-      joined_at TEXT,
-      PRIMARY KEY (group_id, email)
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_dau (
-      date TEXT PRIMARY KEY,
-      dau INTEGER NOT NULL DEFAULT 0,
-      cli_dau INTEGER NOT NULL DEFAULT 0,
-      cloud_agent_dau INTEGER NOT NULL DEFAULT 0,
-      bugbot_dau INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_model_usage (
-      date TEXT NOT NULL,
-      model TEXT NOT NULL,
-      messages INTEGER NOT NULL DEFAULT 0,
-      users INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, model)
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_agent_edits (
-      date TEXT PRIMARY KEY,
-      suggested_diffs INTEGER NOT NULL DEFAULT 0,
-      accepted_diffs INTEGER NOT NULL DEFAULT 0,
-      rejected_diffs INTEGER NOT NULL DEFAULT 0,
-      lines_suggested INTEGER NOT NULL DEFAULT 0,
-      lines_accepted INTEGER NOT NULL DEFAULT 0,
-      green_lines_accepted INTEGER NOT NULL DEFAULT 0,
-      red_lines_accepted INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_tabs (
-      date TEXT PRIMARY KEY,
-      suggestions INTEGER NOT NULL DEFAULT 0,
-      accepts INTEGER NOT NULL DEFAULT 0,
-      rejects INTEGER NOT NULL DEFAULT 0,
-      lines_suggested INTEGER NOT NULL DEFAULT 0,
-      lines_accepted INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_mcp (
-      date TEXT NOT NULL,
-      tool_name TEXT NOT NULL,
-      server_name TEXT NOT NULL,
-      usage INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, tool_name, server_name)
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_file_extensions (
-      date TEXT NOT NULL,
-      extension TEXT NOT NULL,
-      total_files INTEGER NOT NULL DEFAULT 0,
-      lines_accepted INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, extension)
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_client_versions (
-      date TEXT NOT NULL,
-      version TEXT NOT NULL,
-      user_count INTEGER NOT NULL DEFAULT 0,
-      percentage REAL NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, version)
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_commands (
-      date TEXT NOT NULL,
-      command_name TEXT NOT NULL,
-      usage INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, command_name)
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_plans (
-      date TEXT NOT NULL,
-      model TEXT NOT NULL,
-      usage INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, model)
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_commands (
-      date TEXT NOT NULL,
-      command_name TEXT NOT NULL,
-      usage INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, command_name)
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_plans (
-      date TEXT NOT NULL,
-      model TEXT NOT NULL,
-      usage INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, model)
-    );
-
-    CREATE TABLE IF NOT EXISTS analytics_user_mcp (
-      date TEXT NOT NULL,
-      email TEXT NOT NULL,
-      tool_name TEXT NOT NULL,
-      server_name TEXT NOT NULL,
-      usage INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, email, tool_name, server_name)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_user_mcp_email ON analytics_user_mcp(email);
-
-    CREATE TABLE IF NOT EXISTS analytics_user_commands (
-      date TEXT NOT NULL,
-      email TEXT NOT NULL,
-      command_name TEXT NOT NULL,
-      usage INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (date, email, command_name)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_user_commands_email ON analytics_user_commands(email);
-
-    CREATE TABLE IF NOT EXISTS ai_code_commits (
-      email TEXT NOT NULL,
-      date TEXT NOT NULL,
-      repo_name TEXT NOT NULL DEFAULT '',
-      commits INTEGER NOT NULL DEFAULT 0,
-      total_lines_added INTEGER NOT NULL DEFAULT 0,
-      total_lines_deleted INTEGER NOT NULL DEFAULT 0,
-      tab_lines_added INTEGER NOT NULL DEFAULT 0,
-      tab_lines_deleted INTEGER NOT NULL DEFAULT 0,
-      composer_lines_added INTEGER NOT NULL DEFAULT 0,
-      composer_lines_deleted INTEGER NOT NULL DEFAULT 0,
-      non_ai_lines_added INTEGER NOT NULL DEFAULT 0,
-      non_ai_lines_deleted INTEGER NOT NULL DEFAULT 0,
-      collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (email, date, repo_name)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_ai_code_email ON ai_code_commits(email);
-    CREATE INDEX IF NOT EXISTS idx_ai_code_date ON ai_code_commits(date);
-
-    CREATE TABLE IF NOT EXISTS metadata (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS collection_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL,
-      started_at TEXT NOT NULL DEFAULT (datetime('now')),
-      completed_at TEXT,
-      records_count INTEGER DEFAULT 0,
-      error TEXT
-    );
-  `);
-}
-
-function runMigrations(db: Database.Database): void {
-  const cols = db.pragma("table_info(ai_code_commits)") as Array<{ name: string }>;
-  const hasRepoName = cols.some((c) => c.name === "repo_name");
-  if (!hasRepoName) {
-    console.log("[migration] Adding repo_name to ai_code_commits");
-    db.exec(`
-      ALTER TABLE ai_code_commits RENAME TO ai_code_commits_old;
-      CREATE TABLE ai_code_commits (
-        email TEXT NOT NULL,
-        date TEXT NOT NULL,
-        repo_name TEXT NOT NULL DEFAULT '',
-        commits INTEGER NOT NULL DEFAULT 0,
-        total_lines_added INTEGER NOT NULL DEFAULT 0,
-        total_lines_deleted INTEGER NOT NULL DEFAULT 0,
-        tab_lines_added INTEGER NOT NULL DEFAULT 0,
-        tab_lines_deleted INTEGER NOT NULL DEFAULT 0,
-        composer_lines_added INTEGER NOT NULL DEFAULT 0,
-        composer_lines_deleted INTEGER NOT NULL DEFAULT 0,
-        non_ai_lines_added INTEGER NOT NULL DEFAULT 0,
-        non_ai_lines_deleted INTEGER NOT NULL DEFAULT 0,
-        collected_at TEXT NOT NULL DEFAULT (datetime('now')),
-        PRIMARY KEY (email, date, repo_name)
-      );
-      INSERT INTO ai_code_commits (email, date, repo_name, commits, total_lines_added, total_lines_deleted,
-        tab_lines_added, tab_lines_deleted, composer_lines_added, composer_lines_deleted,
-        non_ai_lines_added, non_ai_lines_deleted, collected_at)
-        SELECT email, date, '', commits, total_lines_added, total_lines_deleted,
-          tab_lines_added, tab_lines_deleted, composer_lines_added, composer_lines_deleted,
-          non_ai_lines_added, non_ai_lines_deleted, collected_at
-        FROM ai_code_commits_old;
-      DROP TABLE ai_code_commits_old;
-      CREATE INDEX IF NOT EXISTS idx_ai_code_email ON ai_code_commits(email);
-      CREATE INDEX IF NOT EXISTS idx_ai_code_date ON ai_code_commits(date);
-      CREATE INDEX IF NOT EXISTS idx_ai_code_repo ON ai_code_commits(repo_name);
-    `);
-    console.log("[migration] ai_code_commits migrated successfully");
-  }
-
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_code_repo ON ai_code_commits(repo_name)`);
 }
 
 export function setMetadata(key: string, value: string): void {
@@ -510,13 +160,14 @@ export function upsertSpending(members: MemberSpend[], cycleStart: string): void
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO spending (email, user_id, name, cycle_start, spend_cents, included_spend_cents,
-      fast_premium_requests, monthly_limit_dollars, hard_limit_override_dollars)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      overall_spend_cents, fast_premium_requests, monthly_limit_dollars, hard_limit_override_dollars)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(email, cycle_start) DO UPDATE SET
       user_id = excluded.user_id,
       name = excluded.name,
       spend_cents = excluded.spend_cents,
       included_spend_cents = excluded.included_spend_cents,
+      overall_spend_cents = excluded.overall_spend_cents,
       fast_premium_requests = excluded.fast_premium_requests,
       monthly_limit_dollars = excluded.monthly_limit_dollars,
       hard_limit_override_dollars = excluded.hard_limit_override_dollars,
@@ -525,9 +176,6 @@ export function upsertSpending(members: MemberSpend[], cycleStart: string): void
 
   const tx = db.transaction(() => {
     for (const m of members) {
-      // Defensive defaults guard against future API drift: any of these going
-      // missing previously crashed the collector with a NOT NULL violation
-      // (see GH issue #19).
       stmt.run(
         m.email,
         m.userId ?? null,
@@ -535,6 +183,7 @@ export function upsertSpending(members: MemberSpend[], cycleStart: string): void
         cycleStart,
         m.spendCents ?? 0,
         m.includedSpendCents ?? 0,
+        m.overallSpendCents ?? m.spendCents ?? 0,
         m.fastPremiumRequests ?? 0,
         m.monthlyLimitDollars ?? null,
         m.hardLimitOverrideDollars ?? 0,
@@ -794,7 +443,7 @@ export function insertAnomaly(anomaly: Anomaly): number {
   const result = db
     .prepare(
       `INSERT INTO anomalies (user_email, type, severity, metric, value, threshold, message, detected_at, diagnosis_model, diagnosis_kind, diagnosis_delta)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     )
     .run(
       anomaly.userEmail,
@@ -848,7 +497,7 @@ export function insertIncident(incident: Omit<Incident, "id">): number {
   const result = db
     .prepare(
       `INSERT INTO incidents (anomaly_id, user_email, status, detected_at, alerted_at, mttd_minutes)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
     )
     .run(
       incident.anomalyId,
@@ -1496,7 +1145,7 @@ export function getUserBadges(
 
   const teamStats = db
     .prepare(
-      `SELECT du.email, SUM(du.agent_requests) as reqs, COALESCE(sp.spend_cents, 0) as spend
+      `SELECT du.email, SUM(du.agent_requests) as reqs, COALESCE(MAX(sp.spend_cents), 0) as spend
        FROM daily_usage du
        LEFT JOIN spending sp ON sp.email = du.email
          AND sp.cycle_start = (SELECT MAX(cycle_start) FROM spending)
@@ -2603,15 +2252,15 @@ export function upsertAICodeCommits(commits: AICodeCommit[]): void {
       non_ai_lines_added, non_ai_lines_deleted)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(email, date, repo_name) DO UPDATE SET
-      commits = commits + excluded.commits,
-      total_lines_added = total_lines_added + excluded.total_lines_added,
-      total_lines_deleted = total_lines_deleted + excluded.total_lines_deleted,
-      tab_lines_added = tab_lines_added + excluded.tab_lines_added,
-      tab_lines_deleted = tab_lines_deleted + excluded.tab_lines_deleted,
-      composer_lines_added = composer_lines_added + excluded.composer_lines_added,
-      composer_lines_deleted = composer_lines_deleted + excluded.composer_lines_deleted,
-      non_ai_lines_added = non_ai_lines_added + excluded.non_ai_lines_added,
-      non_ai_lines_deleted = non_ai_lines_deleted + excluded.non_ai_lines_deleted,
+      commits = ai_code_commits.commits + excluded.commits,
+      total_lines_added = ai_code_commits.total_lines_added + excluded.total_lines_added,
+      total_lines_deleted = ai_code_commits.total_lines_deleted + excluded.total_lines_deleted,
+      tab_lines_added = ai_code_commits.tab_lines_added + excluded.tab_lines_added,
+      tab_lines_deleted = ai_code_commits.tab_lines_deleted + excluded.tab_lines_deleted,
+      composer_lines_added = ai_code_commits.composer_lines_added + excluded.composer_lines_added,
+      composer_lines_deleted = ai_code_commits.composer_lines_deleted + excluded.composer_lines_deleted,
+      non_ai_lines_added = ai_code_commits.non_ai_lines_added + excluded.non_ai_lines_added,
+      non_ai_lines_deleted = ai_code_commits.non_ai_lines_deleted + excluded.non_ai_lines_deleted,
       collected_at = datetime('now')
   `);
 
@@ -3001,7 +2650,7 @@ export function getPlanExhaustionStats(emails?: string[]): {
 
   const users = db
     .prepare(
-      `SELECT du.email, m.name,
+      `SELECT du.email, MAX(m.name) as name,
          CAST(julianday(MIN(du.date)) - julianday(?) + 1 AS INT) as days_to_exhaust,
          SUM(du.usage_based_reqs) as usage_based_reqs
        FROM daily_usage du
@@ -3107,7 +2756,7 @@ export function getPlanExhaustedUsers(cycleStart: string): Array<{
   const db = getDb();
   return db
     .prepare(
-      `SELECT du.email, m.name, MIN(du.date) as exhausted_on,
+      `SELECT du.email, MAX(m.name) as name, MIN(du.date) as exhausted_on,
          SUM(du.usage_based_reqs) as total_usage_reqs,
          SUM(du.agent_requests) as total_agent_reqs
        FROM daily_usage du
@@ -3207,7 +2856,7 @@ export function getUserCostPerRequest(
     .prepare(
       `WITH today_data AS (
         SELECT ue.user_email as email,
-          COALESCE(m.name, ue.user_email) as name,
+          COALESCE(MAX(m.name), ue.user_email) as name,
           ROUND(SUM(ue.total_cents)) as spend_cents,
           COUNT(*) as reqs,
           ROUND(SUM(ue.total_cents) / COUNT(*), 2) as cost_per_req,
@@ -3312,7 +2961,12 @@ export interface CostDriverSummary {
 
 export function getUserCostDrivers(email: string, date?: string): CostDriverSummary | null {
   const db = getDb();
-  const dateFilter = date ? `date(ue.timestamp/1000, 'unixepoch') = ?` : `date(ue.timestamp/1000, 'unixepoch') = date('now')`;
+  const dateFilterUe = date
+    ? `date(ue.timestamp/1000, 'unixepoch') = ?`
+    : `date(ue.timestamp/1000, 'unixepoch') = date('now')`;
+  const dateFilter = date
+    ? `date(timestamp/1000, 'unixepoch') = ?`
+    : `date(timestamp/1000, 'unixepoch') = date('now')`;
   const params = date ? [email, date] : [email];
   const row = db
     .prepare(
@@ -3323,7 +2977,7 @@ export function getUserCostDrivers(email: string, date?: string): CostDriverSumm
         ROUND(SUM(CASE WHEN ue.max_mode = 1 THEN ue.total_cents ELSE 0 END)) as max_spend_cents,
         ROUND(SUM(ue.total_cents)) as total_spend_cents
       FROM usage_events ue
-      WHERE ue.user_email = ? AND ${dateFilter} AND ue.total_cents > 0`,
+      WHERE ue.user_email = ? AND ${dateFilterUe} AND ue.total_cents > 0`,
     )
     .get(...params) as { thinking_pct: number | null; max_pct: number | null; thinking_spend_cents: number; max_spend_cents: number; total_spend_cents: number } | undefined;
 
@@ -3535,22 +3189,33 @@ export function getCycleSummaryData(): CycleSummaryData | null {
 import { orderResetTables } from "./reset-tables";
 export { RESETTABLE_TABLES, type ResettableTable } from "./reset-tables";
 
+const PG_SEQUENCE_TABLES: Partial<Record<string, string>> = {
+  usage_events: "usage_events_id_seq",
+  anomalies: "anomalies_id_seq",
+  incidents: "incidents_id_seq",
+};
+
 export function resetTables(tables: readonly string[]): Record<string, number> {
   const db = getDb();
   const counts: Record<string, number> = {};
   const ordered = orderResetTables(tables);
 
   const tx = db.transaction(() => {
-    db.pragma("defer_foreign_keys = ON");
     for (const name of ordered) {
       const before = (db.prepare(`SELECT COUNT(*) AS c FROM ${name}`).get() as { c: number }).c;
-      db.prepare(`DELETE FROM ${name}`).run();
-      db.prepare("DELETE FROM sqlite_sequence WHERE name = ?").run(name);
       counts[name] = before;
+    }
+    for (const name of ordered) {
+      db.prepare(`DELETE FROM ${name}`).run();
+    }
+    for (const name of ordered) {
+      const seq = PG_SEQUENCE_TABLES[name];
+      if (seq) {
+        db.prepare(`ALTER SEQUENCE ${seq} RESTART WITH 1`).run();
+      }
     }
   });
   tx();
 
-  db.pragma("wal_checkpoint(TRUNCATE)");
   return counts;
 }
