@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import { UserLink, useViewer } from "@/components/access";
+import { isRestricted } from "@/lib/types";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { timeAgo } from "@/lib/date-utils";
 import type { Anomaly, Incident } from "@/lib/types";
@@ -45,6 +46,7 @@ interface MergedRow {
 
 export function AnomaliesClient({ timeline }: AnomaliesClientProps) {
   const [filter, setFilter] = useState<Filter>("all");
+  const canAct = !isRestricted(useViewer(), "anomalies.actions");
 
   const openAnomalies = timeline.anomalies.filter((a) => !a.resolvedAt);
   const resolvedAnomalies = timeline.anomalies.filter((a) => a.resolvedAt);
@@ -172,14 +174,14 @@ export function AnomaliesClient({ timeline }: AnomaliesClientProps) {
                         {a.message}
                       </td>
                       <td className="px-4 py-3">
-                        <Link
-                          href={`/users/${encodeURIComponent(a.userEmail ?? "")}`}
+                        <UserLink
+                          email={a.userEmail ?? ""}
                           className="text-blue-400 hover:text-blue-300 text-xs"
                         >
                           {a.userEmail === "team"
                             ? "team"
                             : (a.userEmail ?? "unknown").split("@")[0]}
-                        </Link>
+                        </UserLink>
                       </td>
                       <td
                         className="px-4 py-3 text-zinc-500 text-xs whitespace-nowrap"
@@ -203,7 +205,7 @@ export function AnomaliesClient({ timeline }: AnomaliesClientProps) {
                         </span>
                       </td>
                       <td className="text-right px-4 py-3 whitespace-nowrap space-x-1.5">
-                        {inc && status !== "resolved" && (
+                        {canAct && inc && status !== "resolved" && (
                           <>
                             {status !== "acknowledged" && (
                               <button
