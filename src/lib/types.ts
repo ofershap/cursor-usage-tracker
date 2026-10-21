@@ -1,3 +1,5 @@
+export const isOwnerRole = (role?: string) => role === "owner" || role === "free-owner";
+
 export interface TeamMember {
   name: string;
   email: string;

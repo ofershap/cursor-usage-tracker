@@ -756,7 +756,7 @@ export function getGroupsWithMembers(): Array<{
   member_count: number;
   spend_cents: number;
   emails: string[];
-  members: Array<{ email: string; name: string }>;
+  members: Array<{ email: string; name: string; role: string }>;
 }> {
   const db = getDb();
   const groups = db
@@ -765,14 +765,14 @@ export function getGroupsWithMembers(): Array<{
 
   const memberRows = db
     .prepare(
-      "SELECT gm.group_id, gm.email, COALESCE(m.name, '') as name FROM group_members gm LEFT JOIN members m ON gm.email = m.email",
+      "SELECT gm.group_id, gm.email, COALESCE(m.name, '') as name, COALESCE(m.role, '') as role FROM group_members gm LEFT JOIN members m ON gm.email = m.email",
     )
-    .all() as Array<{ group_id: string; email: string; name: string }>;
+    .all() as Array<{ group_id: string; email: string; name: string; role: string }>;
 
-  const membersByGroup = new Map<string, Array<{ email: string; name: string }>>();
+  const membersByGroup = new Map<string, Array<{ email: string; name: string; role: string }>>();
   for (const row of memberRows) {
     const list = membersByGroup.get(row.group_id) ?? [];
-    list.push({ email: row.email, name: row.name });
+    list.push({ email: row.email, name: row.name, role: row.role });
     membersByGroup.set(row.group_id, list);
   }
 

@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { DetectionConfig } from "@/lib/types";
+import { RoleBadge } from "@/components/access";
 
 interface MemberInfo {
   email: string;
   name: string;
+  role: string;
 }
 
 interface GroupData {
@@ -713,6 +715,7 @@ function BillingGroupsManager() {
             <tr className="text-zinc-500 border-b border-zinc-800">
               <th className="text-left py-1.5 px-2 font-medium">Name</th>
               <th className="text-left py-1.5 px-2 font-medium">Email</th>
+              <th className="text-left py-1.5 px-2 font-medium">Role</th>
               <th className="text-left py-1.5 px-2 font-medium">Current Group</th>
               <th className="text-right py-1.5 px-2 font-medium">Reassign to</th>
             </tr>
@@ -724,6 +727,9 @@ function BillingGroupsManager() {
                 <tr key={member.email} className="border-b border-zinc-800/30 hover:bg-zinc-800/30">
                   <td className="py-1 px-2 text-zinc-200">{member.name || "—"}</td>
                   <td className="py-1 px-2 text-zinc-400 font-mono">{member.email}</td>
+                  <td className="py-1 px-2">
+                    <RoleBadge role={member.role} />
+                  </td>
                   <td className="py-1 px-2 text-zinc-500">{currentGroup?.name ?? "—"}</td>
                   <td className="py-1 px-2 text-right">
                     <select
