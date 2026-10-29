@@ -43,6 +43,30 @@ function bool(v: unknown): boolean {
   return v === true || v === 1 || v === "1";
 }
 
+function normalizeMemberSpend(raw: Record<string, unknown>): MemberSpend {
+  const rawSpend = num(raw.spendCents);
+  const overall = typeof raw.overallSpendCents === "number" ? raw.overallSpendCents : undefined;
+  const rawIncluded =
+    typeof raw.includedSpendCents === "number" ? raw.includedSpendCents : undefined;
+
+  const total = overall ?? rawSpend;
+  const overage = overall !== undefined ? rawSpend : 0;
+  const included = rawIncluded ?? Math.max(0, total - overage);
+
+  return {
+    userId: str(raw, "userId"),
+    email: str(raw, "email"),
+    name: str(raw, "name"),
+    role: str(raw, "role"),
+    spendCents: total,
+    includedSpendCents: included,
+    fastPremiumRequests: num(raw.fastPremiumRequests),
+    monthlyLimitDollars:
+      typeof raw.monthlyLimitDollars === "number" ? raw.monthlyLimitDollars : null,
+    hardLimitOverrideDollars: num(raw.hardLimitOverrideDollars),
+  };
+}
+
 function normalizeFilteredUsageEvent(raw: Record<string, unknown>): FilteredUsageEvent {
   const tuRaw = raw.tokenUsage ?? raw.token_usage;
   let tokenUsage: FilteredUsageEvent["tokenUsage"];
@@ -193,7 +217,11 @@ export class CursorClient {
       cycleStart = new Date(data.subscriptionCycleStart).toISOString().split("T")[0] ?? "";
       limitedUsersCount = data.limitedUsersCount ?? 0;
 
-      allMembers.push(...data.teamMemberSpend);
+      allMembers.push(
+        ...data.teamMemberSpend.map((m) =>
+          normalizeMemberSpend(m as unknown as Record<string, unknown>),
+        ),
+      );
 
       if (page >= data.totalPages) break;
       page++;

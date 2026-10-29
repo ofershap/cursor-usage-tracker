@@ -32,7 +32,22 @@ Poll at most once per hour (data aggregated hourly).
 
 ### POST /teams/spend
 Body: `{ page, pageSize }`
-Returns `{ teamMemberSpend: [{ email, spendCents, fastPremiumRequests }], subscriptionCycleStart: number, totalPages }`
+Returns (post-2026 shape):
+```
+{
+  teamMemberSpend: [{
+    userId, email, name, role, profilePictureUrl,
+    spendCents,            // overage above plan (was cycle total in pre-2026 shape)
+    overallSpendCents,     // cycle-to-date total (new field, post-2026)
+    fastPremiumRequests,
+    monthlyLimitDollars, hardLimitOverrideDollars,
+    effectivePerUserLimitDollars
+  }],
+  subscriptionCycleStart: number,
+  totalPages, totalMembers, limitedUsersCount, maxUserSpendCents
+}
+```
+Note: the meaning of `spendCents` changed in 2026. Pre-2026 it was the cycle total; post-2026 it is the overage above the plan-included amount, and `overallSpendCents` holds the cycle total. `includedSpendCents` was removed from the response. `cursor-client.ts::normalizeMemberSpend` normalizes both shapes so downstream code can rely on `spendCents` = total and `includedSpendCents` = plan-covered. See GH issue #19.
 
 ### POST /teams/filtered-usage-events
 Body: `{ email?, startDate?, endDate?, page, pageSize }`

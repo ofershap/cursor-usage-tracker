@@ -3328,9 +3328,9 @@ export function getUserCostDrivers(email: string, date?: string): CostDriverSumm
 
   const topModel = db
     .prepare(
-      `SELECT model, SUM(total_cents) as s FROM usage_events
-       WHERE user_email = ? AND ${dateFilter} AND total_cents > 0
-       GROUP BY model ORDER BY s DESC LIMIT 1`,
+      `SELECT ue.model, SUM(ue.total_cents) as s FROM usage_events ue
+       WHERE ue.user_email = ? AND ${dateFilter} AND ue.total_cents > 0
+       GROUP BY ue.model ORDER BY s DESC LIMIT 1`,
     )
     .get(...params) as { model: string } | undefined;
 
