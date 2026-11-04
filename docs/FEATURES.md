@@ -133,6 +133,17 @@
 
 ### Billing Groups
 
-- Group management: create, rename, assign members
+- Group management: create, rename, assign members (Cursor role badge per member)
 - HiBob CSV import with change preview
 - Backup export/import
+
+---
+
+## Access Control (optional, `RESTRICTED_FEATURES`)
+
+**Cursor roles applied to the dashboard.**
+
+- Unrestricted: Cursor `owner` / `free-owner`, or listed in `AUTH_UNRESTRICTED_EMAILS`
+- Everyone else (members, unknown emails, anonymous) loses the features listed in `RESTRICTED_FEATURES`
+- Values: `insights`, `anomalies`, `anomalies.actions` (no Ack/Resolve), `user-details` (other members' pages greyed out and blocked), `settings`, `settings.actions` (read-only Settings); `*.actions` covers every `.actions` value
+- A value also restricts its dotted sub-values; the Overview is never restricted

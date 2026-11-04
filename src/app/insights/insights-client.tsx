@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { UserLink } from "@/components/access";
 import {
   AreaChart,
   Area,
@@ -809,9 +810,9 @@ function ClientVersionsSection({
                         <td colSpan={4} className="pb-1">
                           <div className="pl-5 py-1 space-y-0.5">
                             {v.users.map((u) => (
-                              <a
+                              <UserLink
                                 key={u.email}
-                                href={`/users/${encodeURIComponent(u.email)}`}
+                                email={u.email}
                                 className="block text-[11px] text-zinc-400 hover:text-blue-400 transition-colors"
                               >
                                 {u.name}
@@ -820,7 +821,7 @@ function ClientVersionsSection({
                                     needs update
                                   </span>
                                 )}
-                              </a>
+                              </UserLink>
                             ))}
                           </div>
                         </td>
@@ -942,12 +943,9 @@ function PlanExhaustionSection({
                 return (
                   <tr key={u.email} className="border-b border-zinc-800/30 hover:bg-zinc-800/30">
                     <td className="py-1">
-                      <a
-                        href={`/users/${encodeURIComponent(u.email)}`}
-                        className="text-zinc-300 hover:text-blue-400"
-                      >
+                      <UserLink email={u.email} className="text-zinc-300 hover:text-blue-400">
                         {u.name || u.email}
-                      </a>
+                      </UserLink>
                     </td>
                     <td className={`text-right py-1 font-mono font-bold ${dayColor}`}>
                       Day {u.days_to_exhaust}

@@ -2,6 +2,7 @@
 
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import Link from "next/link";
+import { UserLink } from "@/components/access";
 
 interface Runner {
   email: string;
@@ -335,16 +336,12 @@ export function PlanExhaustionRaceBanner({ exhausted, total, pctExhausted, users
               }}
             >
               {r.crossed ? (
-                <Link
-                  href={`/users/${encodeURIComponent(r.email)}`}
-                  className="group relative block"
-                  title={r.name}
-                >
+                <UserLink email={r.email} className="group relative block" title={r.name}>
                   <StickFigure color={r.color} running />
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-[7px] text-zinc-200 shadow-lg pointer-events-none z-20">
                     {r.name}
                   </div>
-                </Link>
+                </UserLink>
               ) : (
                 <div className="opacity-30">
                   <StickFigure color={r.color} />

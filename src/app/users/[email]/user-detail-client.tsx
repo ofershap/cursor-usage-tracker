@@ -5,6 +5,7 @@ import { SpendTrendChart } from "@/components/charts/spend-trend-chart";
 import { formatDateShort } from "@/lib/date-utils";
 import { shortModel } from "@/lib/format-utils";
 import { ExpandableCard } from "@/components/expandable-card";
+import { RoleBadge } from "@/components/access";
 import type { Anomaly } from "@/lib/types";
 import type { UsageBadge, SpendBadge, ContextBadge, AdoptionBadge } from "@/lib/data";
 
@@ -244,7 +245,7 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
             })}
           </div>
           <p className="text-zinc-500 text-xs">
-            {email} · {stats.member?.role ?? "member"}
+            {email} · <RoleBadge role={stats.member?.role ?? "member"} />
             {stats.group && (
               <>
                 {" · "}
