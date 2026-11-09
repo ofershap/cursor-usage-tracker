@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import type { RankedUser, UsageBadge, SpendBadge, ContextBadge, AdoptionBadge } from "@/lib/data";
 import type { SortColumn } from "@/app/dashboard-client";
@@ -299,6 +300,7 @@ export function MembersTable({
   badgeFilter,
   onBadgeFilter,
 }: MembersTableProps) {
+  const router = useRouter();
   const sortLabel =
     sortCol === "spend"
       ? "Spend"
@@ -434,7 +436,11 @@ export function MembersTable({
               return (
                 <tr
                   key={row.email}
-                  className={`border-b border-zinc-800/50 transition-colors ${
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest("a, button")) return;
+                    router.push(userHref(row.email, range));
+                  }}
+                  className={`border-b border-zinc-800/50 transition-colors cursor-pointer group ${
                     isHighlighted
                       ? "bg-blue-500/10 ring-1 ring-blue-500/30"
                       : "hover:bg-zinc-800/30"
@@ -577,7 +583,7 @@ export function MembersTable({
                   <td className="text-right px-4 py-2.5">
                     <Link
                       href={userHref(row.email, range)}
-                      className="text-xs text-zinc-500 hover:text-zinc-300"
+                      className="text-xs text-zinc-500 group-hover:text-zinc-300 transition-colors"
                     >
                       →
                     </Link>
