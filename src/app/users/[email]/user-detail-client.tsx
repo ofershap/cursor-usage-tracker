@@ -5,10 +5,17 @@ import { SpendTrendChart } from "@/components/charts/spend-trend-chart";
 import { formatDateShort } from "@/lib/date-utils";
 import { shortModel } from "@/lib/format-utils";
 import { ExpandableCard } from "@/components/expandable-card";
+import {
+  TimeRangeSelector,
+  formatTimeLabel,
+  type TimeRange,
+} from "@/components/time-range-selector";
 import type { Anomaly } from "@/lib/types";
+import { overviewHref } from "@/lib/time-range";
 import type { UsageBadge, SpendBadge, ContextBadge, AdoptionBadge } from "@/lib/data";
 
 interface UserStats {
+  windowSpendCents: number;
   member:
     | { name: string; email: string; role: string; first_seen: string; last_seen: string }
     | undefined;
@@ -107,6 +114,7 @@ interface UserStats {
 interface UserDetailClientProps {
   email: string;
   stats: UserStats;
+  initialRange: TimeRange;
 }
 
 function fmt(n: number): string {
@@ -189,27 +197,22 @@ const BADGE_STYLES: Record<string, { label: string; color: string; tooltip: stri
   },
 };
 
-export function UserDetailClient({ email, stats }: UserDetailClientProps) {
+export function UserDetailClient({ email, stats, initialRange: range }: UserDetailClientProps) {
   const currentSpend = stats.spending[0];
-  const activityDays = stats.dailyActivity.length;
+  const timeLabel = formatTimeLabel(range);
   const totalAgentRequests = stats.dailyActivity.reduce((sum, d) => sum + d.agent_requests, 0);
   const cycleStart = currentSpend?.cycle_start;
-  const cycleAgentRequests = cycleStart
-    ? stats.dailyActivity
-        .filter((d) => d.date >= cycleStart)
-        .reduce((sum, d) => sum + d.agent_requests, 0)
-    : totalAgentRequests;
-  const billedCycleCents = currentSpend?.spend_cents ?? 0;
-  const cycleSpendDollars = billedCycleCents / 100;
+  const windowSpendDollars = stats.windowSpendCents / 100;
   const dollarsPerReq =
-    cycleAgentRequests > 0 ? (billedCycleCents / cycleAgentRequests / 100).toFixed(2) : null;
+    totalAgentRequests > 0 ? (stats.windowSpendCents / totalAgentRequests / 100).toFixed(2) : null;
   const cycleDaysElapsed = cycleStart
     ? Math.max(
         1,
         Math.ceil((Date.now() - new Date(`${cycleStart}T12:00:00Z`).getTime()) / 86_400_000),
       )
     : Math.max(1, stats.dailySpend.length);
-  const dailyAvgSpend = cycleSpendDollars / cycleDaysElapsed;
+  const windowDays = range === "cycle" ? cycleDaysElapsed : range;
+  const dailyAvgSpend = windowSpendDollars / windowDays;
 
   const mergedDailyData = buildMergedDailyData(stats.dailySpend, stats.dailyActivity);
   const hasUsageEvents = stats.usageEventsSummary.length > 0;
@@ -223,7 +226,7 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
-        <Link href="/" className="text-xs text-zinc-500 hover:text-zinc-300">
+        <Link href={overviewHref(range)} className="text-xs text-zinc-500 hover:text-zinc-300">
           ← Back
         </Link>
         <div>
@@ -258,12 +261,15 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
             )}
           </p>
         </div>
+        <div className="ml-auto">
+          <TimeRangeSelector value={range} />
+        </div>
       </div>
 
       <div className="flex items-stretch gap-2 overflow-x-auto">
         <KpiCard
-          label="Cycle Spend"
-          value={`$${Math.round(cycleSpendDollars).toLocaleString()}`}
+          label={`Spend (${timeLabel})`}
+          value={`$${Math.round(windowSpendDollars).toLocaleString()}`}
           sub={`~$${dailyAvgSpend.toFixed(0)}/day`}
         />
         <KpiCard
@@ -271,7 +277,7 @@ export function UserDetailClient({ email, stats }: UserDetailClientProps) {
           value={dollarsPerReq != null ? `$${dollarsPerReq}` : "—"}
           sub="Cost per request"
         />
-        <KpiCard label={`Agent Reqs (${activityDays}d)`} value={fmt(totalAgentRequests)} />
+        <KpiCard label={`Agent Reqs (${timeLabel})`} value={fmt(totalAgentRequests)} />
         <KpiCard
           label="Diffs Accepted"
           value={stats.aiAdoption ? `${stats.aiAdoption.acceptRate}%` : "—"}

@@ -10,6 +10,12 @@ import { MembersTable } from "@/components/dashboard/members-table";
 import Link from "next/link";
 import { shortModel } from "@/lib/format-utils";
 import { ExpandableCard } from "@/components/expandable-card";
+import { DEFAULT_RANGE } from "@/lib/time-range";
+import {
+  TimeRangeSelector,
+  formatTimeLabel,
+  type TimeRange,
+} from "@/components/time-range-selector";
 
 interface BillingGroupWithMembers {
   id: string;
@@ -26,19 +32,6 @@ interface ModelCost {
   total_spend: number;
   total_reqs: number;
   emails: string[];
-}
-
-const TIME_RANGES = [
-  { label: "24h", days: 1 },
-  { label: "3d", days: 3 },
-  { label: "7d", days: 7 },
-  { label: "14d", days: 14 },
-  { label: "30d", days: 30 },
-] as const;
-
-function formatTimeLabel(days: number): string {
-  if (days === 1) return "24h";
-  return `${days}d`;
 }
 
 function fmt(n: number): string {
@@ -58,14 +51,12 @@ interface SpendBreakdownRow {
 
 interface DashboardClientProps {
   initialData: FullDashboard;
+  initialRange: TimeRange;
 }
 
-export function DashboardClient({ initialData }: DashboardClientProps) {
+export function DashboardClient({ initialData: data, initialRange: range }: DashboardClientProps) {
   const searchParams = useSearchParams();
-  const [data, setData] = useState(initialData);
-  const [days, setDays] = useState(30);
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(false);
   const [sortCol, setSortCol] = useState<SortColumn>("spend");
   const [sortAsc, setSortAsc] = useState(false);
   const [badgeFilter, setBadgeFilter] = useState<string | null>(null);
@@ -113,11 +104,6 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
           },
         )
         .catch(() => {});
-    }
-    const saved = localStorage.getItem("dashboard-days");
-    if (saved) {
-      const parsed = parseInt(saved, 10);
-      if (parsed !== 30) changeTimeRange(parsed);
     }
   }, []);
 
@@ -269,20 +255,8 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
     );
   }, [stats.rankedUsers, search]);
 
-  async function changeTimeRange(newDays: number) {
-    setDays(newDays);
-    localStorage.setItem("dashboard-days", String(newDays));
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/stats?days=${newDays}`);
-      const newData: FullDashboard = await res.json();
-      setData(newData);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const timeLabel = formatTimeLabel(days);
+  const days = data.days;
+  const timeLabel = formatTimeLabel(range);
   const isSearching =
     search.trim().length > 0 ||
     selectedGroup !== "all" ||
@@ -290,7 +264,6 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
     exhaustionFilter !== null ||
     modelFilter !== null;
   const totalLines = stats.dailyTeamActivity.reduce((s, d) => s + d.total_lines_added, 0);
-  const effectiveDays = Math.min(days, stats.cycleDays);
   const cycleStartDate = new Date(stats.cycleStart);
   const cycleEndDate = stats.cycleEnd
     ? new Date(stats.cycleEnd)
@@ -365,6 +338,19 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
             </button>
           )}
         </div>
+        <div className="text-[11px] text-zinc-600">
+          {isSearching ? `${filteredUsers.length} / ` : ""}
+          {stats.totalMembers} members
+          {selectedGroup !== "all" && (
+            <button
+              onClick={() => setSelectedGroup("all")}
+              className="ml-1 text-blue-400 hover:text-blue-300"
+              title="Clear group filter"
+            >
+              ✕
+            </button>
+          )}
+        </div>
         {groups.length > 1 && (
           <select
             value={selectedGroup}
@@ -399,27 +385,17 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
             })()}
           </select>
         )}
-        <div className="flex bg-zinc-800 rounded-md p-0.5">
-          {TIME_RANGES.map((r) => (
-            <button
-              key={r.days}
-              onClick={() => changeTimeRange(r.days)}
-              className={`px-2 py-1 text-[11px] font-medium rounded transition-colors ${
-                days === r.days ? "bg-blue-600 text-white" : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
-        {loading && <span className="text-[11px] text-zinc-500 animate-pulse">Updating...</span>}
         {exhaustionFilter && (
           <span className="inline-flex items-center gap-1.5 bg-orange-600/20 text-orange-300 rounded-md px-2 py-1 text-[11px] font-medium">
             {exhaustionFilter.label} ({exhaustionFilter.emails.size})
             <button
               onClick={() => {
                 setExhaustionFilter(null);
-                window.history.replaceState({}, "", "/");
+                window.history.replaceState(
+                  {},
+                  "",
+                  range === DEFAULT_RANGE ? "/" : `/?range=${range}`,
+                );
               }}
               className="hover:text-orange-100 cursor-pointer"
             >
@@ -438,18 +414,8 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
             </button>
           </span>
         )}
-        <div className="ml-auto text-[11px] text-zinc-600">
-          {isSearching ? `${filteredUsers.length} / ` : ""}
-          {stats.totalMembers} members
-          {selectedGroup !== "all" && (
-            <button
-              onClick={() => setSelectedGroup("all")}
-              className="ml-1 text-blue-400 hover:text-blue-300"
-              title="Clear group filter"
-            >
-              ✕
-            </button>
-          )}
+        <div className="ml-auto">
+          <TimeRangeSelector value={range} />
         </div>
       </div>
 
@@ -458,7 +424,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
         <Kpi
           label={`${isSearching ? "Filtered" : "Team"} Spend (${timeLabel})`}
           value={`$${Math.round(filteredSpendCents / 100).toLocaleString()}`}
-          sub={`~$${Math.round(filteredSpendCents / 100 / (effectiveDays || 1))}/day`}
+          sub={`~$${Math.round(filteredSpendCents / 100 / (days || 1))}/day`}
         />
         <Kpi
           label="Billing Cycle"
@@ -493,12 +459,12 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
         <Kpi
           label={`Requests (${timeLabel})`}
           value={fmt(filteredAgentRequests)}
-          sub={`~${fmt(Math.round(filteredAgentRequests / (effectiveDays || 1)))}/day`}
+          sub={`~${fmt(Math.round(filteredAgentRequests / (days || 1)))}/day`}
         />
         <Kpi
           label={`Lines (${timeLabel})`}
           value={fmt(filteredLinesAdded)}
-          sub={`~${fmt(Math.round(filteredLinesAdded / (effectiveDays || 1)))}/day`}
+          sub={`~${fmt(Math.round(filteredLinesAdded / (days || 1)))}/day`}
         />
       </div>
 
@@ -526,7 +492,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
           <SpendTrendChart
             data={filteredTeamDailySpend}
             selectedDays={days}
-            avgPerDay={filteredSpendCents / 100 / (effectiveDays || 1)}
+            avgPerDay={filteredSpendCents / 100 / (days || 1)}
           />
         </ExpandableCard>
         <ExpandableCard>
@@ -550,6 +516,8 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
               data={filteredUsers.slice(0, 20)}
               highlightEmail={searchedUser?.email}
               expanded={exp}
+              timeLabel={timeLabel}
+              range={range}
             />
           )}
         </ExpandableCard>
@@ -567,6 +535,7 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
           onSort={handleSort}
           highlightEmail={searchedUser?.email}
           timeLabel={timeLabel}
+          range={range}
           badgeFilter={badgeFilter}
           onBadgeFilter={handleBadgeFilter}
         />

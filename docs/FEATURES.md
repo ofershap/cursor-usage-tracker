@@ -8,7 +8,7 @@
 
 - Search by name/email
 - Filter by billing group
-- Time range: 24h / 3d / 7d / 14d / 30d
+- Time range: 24h / 3d / 7d / 14d / 30d / Cycle (default, from the billing cycle start). Spend, ranks, $/req and the charts all follow the selected range, over as many billing cycles as it spans.
 
 ### Stat Cards
 
@@ -57,10 +57,11 @@
 
 - Name, email, role, billing group link
 - Profile badges (same as dashboard)
+- Time range: 24h / 3d / 7d / 14d / 30d / Cycle (default)
 
 ### KPI Cards
 
-- **Cycle Spend** — total $ in billing cycle, $/day
+- **Spend** — total $ in time range, $/day
 - **$/Req** — cost per agent request
 - **Agent Reqs** — total requests in time range
 - **Diffs Accepted** — % of agent diffs accepted (accepts/applies), raw counts
@@ -85,6 +86,10 @@
 ## Insights (`/insights`)
 
 **Team analytics — adoption, efficiency, trends.**
+
+### Controls
+
+- Time range: 24h / 3d / 7d / 14d / 30d / Cycle (default), all sections except Plan Exhaustion and Client Versions
 
 ### Stat Cards
 

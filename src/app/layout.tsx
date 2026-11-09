@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
@@ -27,7 +28,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <Image src="/logo.png" alt="" width={22} height={22} aria-hidden />
                   <span className="text-sm font-semibold text-white">Cursor Tracker</span>
                 </Link>
-                <NavLinks />
+                <Suspense>
+                  <NavLinks />
+                </Suspense>
               </div>
               <div className="flex items-center gap-2">
                 <UpgradeBanner />

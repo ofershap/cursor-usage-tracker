@@ -1,15 +1,21 @@
 import { Suspense } from "react";
 import { getFullDashboard } from "@/lib/data";
+import { parseRange } from "@/lib/time-range";
 import { DashboardClient } from "./dashboard-client";
 
 export const dynamic = "force-dynamic";
 
-export default function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string }>;
+}) {
+  const range = parseRange((await searchParams).range);
   try {
-    const data = getFullDashboard(30);
+    const data = getFullDashboard(range);
     return (
       <Suspense>
-        <DashboardClient initialData={data} />
+        <DashboardClient initialData={data} initialRange={range} />
       </Suspense>
     );
   } catch {

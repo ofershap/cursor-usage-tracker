@@ -13,32 +13,40 @@ import {
   getPlanExhaustionStats,
   getGroupsWithMembers,
   getRepoAIAttribution,
+  getCycleWindowDays,
 } from "@/lib/data";
+import { parseRange } from "@/lib/time-range";
 import { InsightsClient } from "./insights-client";
 
 export const dynamic = "force-dynamic";
 
-export default function InsightsPage() {
+export default async function InsightsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string }>;
+}) {
+  const range = parseRange((await searchParams).range);
   try {
+    const days = range === "cycle" ? getCycleWindowDays() : range;
     const data = {
-      dau: getAnalyticsDAU(30),
-      modelSummary: getAnalyticsModelUsageSummary(30),
-      modelTrend: getAnalyticsModelUsageTrend(30),
-      agentEdits: getAnalyticsAgentEditsTrend(30),
-      tabs: getAnalyticsTabsTrend(30),
-      mcp: getAnalyticsMCPSummary(30),
-      commands: getAnalyticsCommandsSummary(30),
-      fileExtensions: getAnalyticsFileExtensionsSummary(30),
+      dau: getAnalyticsDAU(days),
+      modelSummary: getAnalyticsModelUsageSummary(days),
+      modelTrend: getAnalyticsModelUsageTrend(days),
+      agentEdits: getAnalyticsAgentEditsTrend(days),
+      tabs: getAnalyticsTabsTrend(days),
+      mcp: getAnalyticsMCPSummary(days),
+      commands: getAnalyticsCommandsSummary(days),
+      fileExtensions: getAnalyticsFileExtensionsSummary(days),
       clientVersions: getAnalyticsClientVersionsSummary(),
       versionUsers: getUsersByClientVersion(),
-      modelEfficiency: getModelEfficiency(),
+      modelEfficiency: getModelEfficiency(undefined, days),
       planExhaustion: getPlanExhaustionStats(),
-      repoAttribution: getRepoAIAttribution(30),
+      repoAttribution: getRepoAIAttribution(days),
     };
 
     const groups = getGroupsWithMembers();
 
-    return <InsightsClient initialData={data} groups={groups} />;
+    return <InsightsClient initialData={data} initialRange={range} groups={groups} />;
   } catch {
     return (
       <div className="text-center py-20">

@@ -132,6 +132,11 @@ interface InsightsData {
 }
 
 import { formatDateTick, formatDateLabel } from "@/lib/date-utils";
+import {
+  TimeRangeSelector,
+  formatTimeLabel,
+  type TimeRange,
+} from "@/components/time-range-selector";
 import { ExpandableCard } from "@/components/expandable-card";
 import { PlanExhaustionRaceBanner } from "@/components/plan-exhaustion-race";
 
@@ -142,11 +147,10 @@ interface GroupInfo {
   emails: string[];
 }
 
-const TIME_RANGES = [
-  { label: "7d", days: 7 },
-  { label: "14d", days: 14 },
-  { label: "30d", days: 30 },
-];
+function formatWindow(range: TimeRange): string {
+  if (range === "cycle") return "Current cycle";
+  return range === 1 ? "Last 24h" : `Last ${range} days`;
+}
 
 const COLORS = [
   "#3b82f6",
@@ -170,13 +174,15 @@ function fmt(n: number): string {
 
 export function InsightsClient({
   initialData,
+  initialRange,
   groups,
 }: {
   initialData: InsightsData;
+  initialRange: TimeRange;
   groups: GroupInfo[];
 }) {
   const [data, setData] = useState<InsightsData>(initialData);
-  const [days, setDays] = useState(30);
+  const days = initialRange;
   const [selectedGroup, setSelectedGroup] = useState("all");
   const [loading, setLoading] = useState(false);
 
@@ -196,7 +202,7 @@ export function InsightsClient({
 
   const isFiltered = selectedGroup !== "all";
 
-  const fetchData = useCallback(async (newDays: number, group: string) => {
+  const fetchData = useCallback(async (newDays: TimeRange, group: string) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ days: String(newDays) });
@@ -208,7 +214,8 @@ export function InsightsClient({
     }
   }, []);
 
-  const isDefault = days === 30 && selectedGroup === "all";
+  const isDefault = selectedGroup === "all";
+  const timeLabel = formatTimeLabel(days);
 
   useEffect(() => {
     if (isDefault) {
@@ -313,21 +320,7 @@ export function InsightsClient({
               })()}
             </select>
           )}
-          <div className="flex bg-zinc-800 rounded-md p-0.5">
-            {TIME_RANGES.map((r) => (
-              <button
-                key={r.days}
-                onClick={() => setDays(r.days)}
-                className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                  days === r.days
-                    ? "bg-zinc-700 text-zinc-100"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
+          <TimeRangeSelector value={days} />
         </div>
       </div>
 
@@ -338,7 +331,7 @@ export function InsightsClient({
           value={dauSummary.avgDau.toString()}
           sub={`Peak: ${dauSummary.peakDau}`}
         />
-        <MiniKpi label="Commands" value={fmt(totalCommands)} sub={`${days}d total`} />
+        <MiniKpi label="Commands" value={fmt(totalCommands)} sub={`${timeLabel} total`} />
         <MiniKpi label="Agent Lines" value={fmt(totalAgentLines)} sub="accepted" />
         <MiniKpi label="Tab Lines" value={fmt(totalTabLines)} sub="accepted" />
         <MiniKpi label="MCP Tools" value={data.mcp.length.toString()} sub="unique tools" />
@@ -364,7 +357,7 @@ export function InsightsClient({
         <ExpandableCard>
           <ModelEfficiencySection
             data={data.modelEfficiency}
-            days={days}
+            windowLabel={formatWindow(days)}
             groupName={isFiltered ? selectedGroupName : undefined}
           />
         </ExpandableCard>
@@ -591,7 +584,7 @@ export function InsightsClient({
       {/* Tables Row: Repo Attribution + File Extensions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <ExpandableCard>
-          <ChartCard title={`Repository Code Volume (${days}d)`}>
+          <ChartCard title={`Repository Code Volume (${timeLabel})`}>
             {data.repoAttribution?.length > 0 ? (
               (() => {
                 const grandTotal = data.repoAttribution.reduce((s, r) => s + r.total_lines, 0) || 1;
@@ -968,11 +961,11 @@ function PlanExhaustionSection({
 
 function ModelEfficiencySection({
   data,
-  days,
+  windowLabel,
   groupName,
 }: {
   data: ModelEfficiencyEntry[];
-  days: number;
+  windowLabel: string;
   groupName?: string;
 }) {
   const [showDetail, setShowDetail] = useState(false);
@@ -1006,8 +999,8 @@ function ModelEfficiencySection({
   const maxSpend = bySpend[0]?.total_spend_usd ?? 1;
 
   const subtitle = groupName
-    ? `${groupName} · Last ${days} days`
-    : `Models with $30+ spend · Last ${days} days`;
+    ? `${groupName} · ${windowLabel}`
+    : `Models with $30+ spend · ${windowLabel}`;
 
   return (
     <div className="space-y-3">
