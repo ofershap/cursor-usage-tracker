@@ -71,7 +71,7 @@
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.18",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^13.0.3",
     "next": "^16.1.6",
     "next-auth": "^5.0.0-beta.30",
     "react": "^19.2.4",
@@ -86,7 +86,7 @@
     "@next/eslint-plugin-next": "^16.1.6",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/git": "^11.0.1",
-    "@types/better-sqlite3": "^7.6.13",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -96,8 +96,8 @@
     "prettier": "^3.8.1",
     "semantic-release": "^25.0.3",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.56.0",
-    "vitest": "^4.0.18"
+    "vitest": "^5.1.0"
   }
 }
