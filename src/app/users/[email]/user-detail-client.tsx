@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { SpendTrendChart } from "@/components/charts/spend-trend-chart";
-import { formatDateShort } from "@/lib/date-utils";
+import { formatDateShort, isHourKey } from "@/lib/date-utils";
 import { shortModel } from "@/lib/format-utils";
 import { ExpandableCard } from "@/components/expandable-card";
 import {
@@ -40,7 +40,7 @@ interface UserStats {
   }>;
   modelBreakdown: Array<{ model: string; days_used: number; total_requests: number }>;
   anomalies: Anomaly[];
-  dailySpend: Array<{ date: string; spend_cents: number }>;
+  dailySpend: Array<{ date: string; spend_cents: number; requests?: number }>;
   usageEventsSummary: Array<{
     model: string;
     requests: number;
@@ -215,7 +215,16 @@ export function UserDetailClient({ email, stats, initialRange: range }: UserDeta
   const windowDays = range === "cycle" ? cycleDaysElapsed : range;
   const dailyAvgSpend = windowSpendDollars / windowDays;
 
-  const mergedDailyData = buildMergedDailyData(stats.dailySpend, stats.dailyActivity);
+  // the 24h range charts hours; the table below stays per day
+  const spendByDay = new Map<string, number>();
+  for (const d of stats.dailySpend) {
+    const day = d.date.slice(0, 10);
+    spendByDay.set(day, (spendByDay.get(day) ?? 0) + d.spend_cents);
+  }
+  const dailySpendRows = isHourKey(stats.dailySpend[0]?.date ?? "")
+    ? [...spendByDay].map(([date, spend_cents]) => ({ date, spend_cents }))
+    : stats.dailySpend;
+  const mergedDailyData = buildMergedDailyData(dailySpendRows, stats.dailyActivity);
   const hasUsageEvents = stats.usageEventsSummary.length > 0;
 
   const userBadges: string[] = [];
@@ -319,7 +328,7 @@ export function UserDetailClient({ email, stats, initialRange: range }: UserDeta
               const activity = stats.dailyActivity.find((a) => a.date === d.date);
               return {
                 ...d,
-                agent_requests: activity?.agent_requests,
+                agent_requests: activity?.agent_requests ?? d.requests,
                 lines_added: activity?.lines_added,
                 lines_deleted: activity?.lines_deleted,
               };

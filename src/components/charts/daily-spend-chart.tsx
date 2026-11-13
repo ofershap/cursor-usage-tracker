@@ -13,7 +13,7 @@ import {
   usePlotArea,
 } from "recharts";
 import type { DailySpendDataPoint } from "@/app/dashboard-client";
-import { formatDateTick, formatDateLabel } from "@/lib/date-utils";
+import { formatDateTick, formatDateLabel, isHourKey, isTickHour } from "@/lib/date-utils";
 import { CYCLE_STROKE, CYCLE_STROKE_WIDTH, CycleLabels } from "./cycle-marker";
 
 const COLORS = ["#3b82f6", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444", "#ec4899"];
@@ -68,17 +68,26 @@ export function DailySpendChart({ data, onNameClick, cycleStarts = [] }: DailySp
     colorMap.set(key, key === "Others" ? OTHERS_COLOR : (COLORS[i % COLORS.length] ?? "#71717a"));
   });
 
-  const boundaries = cycleStarts
-    .map((start) => points.findIndex((p) => p.date >= start))
-    .filter((i) => i > 0);
+  const hourly = isHourKey(points[0]?.date ?? "");
+  const boundaries = hourly
+    ? []
+    : cycleStarts.map((start) => points.findIndex((p) => p.date >= start)).filter((i) => i > 0);
 
   return (
     <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-      <h3 className="text-xs font-medium text-zinc-400 mb-2">Daily Spend by Top Users</h3>
+      <h3 className="text-xs font-medium text-zinc-400 mb-2">
+        {hourly ? "Hourly" : "Daily"} Spend by Top Users
+      </h3>
       <ResponsiveContainer width="100%" height={240}>
         <BarChart data={points} margin={{ top: boundaries.length ? 20 : 5, left: 0, right: 10 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-          <XAxis dataKey="date" stroke="#71717a" fontSize={11} tickFormatter={formatDateTick} />
+          <XAxis
+            dataKey="date"
+            stroke="#71717a"
+            fontSize={11}
+            tickFormatter={formatDateTick}
+            {...(hourly && { ticks: points.map((p) => p.date).filter(isTickHour), interval: 0 })}
+          />
           <YAxis
             stroke="#71717a"
             fontSize={11}

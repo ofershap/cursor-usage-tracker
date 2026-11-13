@@ -11,6 +11,7 @@ import Link from "next/link";
 import { shortModel } from "@/lib/format-utils";
 import { ExpandableCard } from "@/components/expandable-card";
 import { DEFAULT_RANGE } from "@/lib/time-range";
+import { isHourKey } from "@/lib/date-utils";
 import {
   TimeRangeSelector,
   formatTimeLabel,
@@ -301,20 +302,28 @@ export function DashboardClient({ initialData: data, initialRange: range }: Dash
     return data.dailySpendBreakdown.filter((r) => filteredEmails.has(r.email));
   }, [isSearching, data.dailySpendBreakdown, filteredEmails]);
 
+  // the 24h range comes back hour by hour: keep every hour, empty ones included
+  const hourKeys = useMemo(
+    () =>
+      isHourKey(data.teamDailySpend[0]?.date ?? "") ? data.teamDailySpend.map((r) => r.date) : null,
+    [data.teamDailySpend],
+  );
+
   const filteredTeamDailySpend = useMemo(() => {
     if (!isSearching) return data.teamDailySpend;
     const byDate = new Map<string, number>();
     for (const r of filteredBreakdown) {
       byDate.set(r.date, (byDate.get(r.date) ?? 0) + r.spend_cents);
     }
+    if (hourKeys) return hourKeys.map((date) => ({ date, spend_cents: byDate.get(date) ?? 0 }));
     return [...byDate.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, spend_cents]) => ({ date, spend_cents }));
-  }, [isSearching, data.teamDailySpend, filteredBreakdown]);
+  }, [isSearching, data.teamDailySpend, filteredBreakdown, hourKeys]);
 
   const dailySpendData = useMemo(() => {
-    return buildDailySpendData(filteredBreakdown);
-  }, [filteredBreakdown]);
+    return buildDailySpendData(filteredBreakdown, hourKeys);
+  }, [filteredBreakdown, hourKeys]);
 
   return (
     <div className="space-y-3">
@@ -491,7 +500,6 @@ export function DashboardClient({ initialData: data, initialRange: range }: Dash
         <ExpandableCard>
           <SpendTrendChart
             data={filteredTeamDailySpend}
-            selectedDays={days}
             avgPerDay={filteredSpendCents / 100 / (days || 1)}
             cycleStarts={data.cycleStarts}
           />
@@ -560,7 +568,10 @@ function shortDisplayName(fullName: string): string {
   return parts[0] ?? fullName;
 }
 
-function buildDailySpendData(breakdown: SpendBreakdownRow[]): {
+function buildDailySpendData(
+  breakdown: SpendBreakdownRow[],
+  hourKeys: string[] | null,
+): {
   points: DailySpendDataPoint[];
   topNames: string[];
 } {
@@ -592,12 +603,14 @@ function buildDailySpendData(breakdown: SpendBreakdownRow[]): {
   const topNames = topFullNames.map((n) => fullToDisplay.get(n) ?? n);
 
   const byDate = new Map<string, DailySpendDataPoint>();
+  const addPoint = (date: string) => {
+    const point: DailySpendDataPoint = { date, total: 0, Others: 0 };
+    for (const n of topNames) point[n] = 0;
+    byDate.set(date, point);
+  };
+  for (const date of hourKeys ?? []) addPoint(date);
   for (const row of breakdown) {
-    if (!byDate.has(row.date)) {
-      const point: DailySpendDataPoint = { date: row.date, total: 0, Others: 0 };
-      for (const n of topNames) point[n] = 0;
-      byDate.set(row.date, point);
-    }
+    if (!byDate.has(row.date)) addPoint(row.date);
     const point = byDate.get(row.date) as Record<string, number>;
     const display = fullToDisplay.get(row.name);
     const dollars = row.spend_cents / 100;

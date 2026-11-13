@@ -10,10 +10,9 @@ import {
   ResponsiveContainer,
   CartesianGrid,
   ReferenceLine,
-  ReferenceArea,
   DefaultZIndexes,
 } from "recharts";
-import { formatDateTick, formatDateLabel } from "@/lib/date-utils";
+import { formatDateTick, formatDateLabel, isHourKey, isTickHour } from "@/lib/date-utils";
 import { AXIS_STROKE, CYCLE_STROKE, CYCLE_STROKE_WIDTH, CycleLabels } from "./cycle-marker";
 
 interface SpendDataPoint {
@@ -26,7 +25,6 @@ interface SpendDataPoint {
 
 interface SpendTrendChartProps {
   data: Array<SpendDataPoint>;
-  selectedDays?: number;
   avgPerDay?: number;
   cycleStarts?: string[];
 }
@@ -44,12 +42,7 @@ const TOOLTIP_STYLE = {
   color: "#fafafa",
 } as const;
 
-export function SpendTrendChart({
-  data,
-  selectedDays,
-  avgPerDay,
-  cycleStarts = [],
-}: SpendTrendChartProps) {
+export function SpendTrendChart({ data, avgPerDay, cycleStarts = [] }: SpendTrendChartProps) {
   if (!data.length) {
     return (
       <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4 text-center text-zinc-500 text-sm">
@@ -80,34 +73,33 @@ export function SpendTrendChart({
 
   const hasCostPerReq = chartData.some((d) => d.costPerReq != null);
 
-  const provisionalDays = 2;
+  const hourly = isHourKey(data[0]?.date ?? "");
+  const provisionalDays = hourly ? 1 : 2;
   const provisionalStart =
     chartData.length > provisionalDays
       ? chartData[chartData.length - provisionalDays]?.date
       : undefined;
 
   // a new cycle starts between two days: the line sits halfway between them
-  const cycleLines = cycleStarts
-    .map((start) => chartData.findIndex((d) => d.date >= start))
-    .filter((i) => i > 0)
-    .map((i) => i - 0.5);
+  const cycleLines = hourly
+    ? []
+    : cycleStarts
+        .map((start) => chartData.findIndex((d) => d.date >= start))
+        .filter((i) => i > 0)
+        .map((i) => i - 0.5);
 
   const step = chartData.length <= 14 ? 1 : Math.floor(chartData.length / 10) + 1;
-  const tickIdx = chartData.map((d) => d.idx).filter((i) => i % step === 0);
+  const tickIdx = chartData
+    .filter((d) => (hourly ? isTickHour(d.date) : d.idx % step === 0))
+    .map((d) => d.idx);
 
-  const cutoffDate =
-    selectedDays && selectedDays < data.length ? data[data.length - selectedDays]?.date : undefined;
-
-  const avg = avgPerDay ?? chartData.reduce((s, d) => s + d.spend, 0) / (chartData.length || 1);
-
-  const dimEndIdx =
-    cutoffDate && data.length > 0 ? Math.max(0, data.length - (selectedDays ?? 0) - 1) : undefined;
+  const total = chartData.reduce((s, d) => s + d.spend, 0);
+  const avg = hourly ? total / 24 : (avgPerDay ?? total / (chartData.length || 1));
 
   return (
     <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
       <div className="flex items-baseline gap-2 mb-2">
-        <h3 className="text-xs font-medium text-zinc-400">Daily Spend</h3>
-        <span className="text-[10px] text-zinc-600">{data.length} days of data</span>
+        <h3 className="text-xs font-medium text-zinc-400">{hourly ? "Hourly" : "Daily"} Spend</h3>
         <span className="text-[10px] text-blue-400/70 flex items-center gap-1">
           <span className="inline-block w-3 border-t border-blue-400" />
           spend
@@ -120,7 +112,9 @@ export function SpendTrendChart({
         )}
         {provisionalStart && (
           <span className="text-[10px] text-amber-500/70 ml-auto">
-            Last {provisionalDays}d may be partial · daily shape from events, totals match billing
+            {hourly
+              ? "Current hour may be partial · hourly shape from events, totals match billing"
+              : `Last ${provisionalDays}d may be partial · daily shape from events, totals match billing`}
           </span>
         )}
       </div>
@@ -158,7 +152,6 @@ export function SpendTrendChart({
               if (!active || !payload?.length) return null;
               const pt = payload[0]?.payload as (typeof chartData)[0] | undefined;
               if (!pt) return null;
-              const isInRange = !cutoffDate || pt.date >= cutoffDate;
               const isProvisional = provisionalStart != null && pt.date >= provisionalStart;
               const changeColor = pt.change > 0 ? "#ef4444" : pt.change < 0 ? "#22c55e" : "#a1a1aa";
               const changeSign = pt.change > 0 ? "+" : "";
@@ -166,7 +159,6 @@ export function SpendTrendChart({
                 <div style={TOOLTIP_STYLE} className="px-3 py-2 text-xs">
                   <div className="text-zinc-400 mb-1">
                     {formatDateLabel(pt.date)}
-                    {!isInRange && <span className="text-zinc-600 ml-1">(context)</span>}
                     {isProvisional && <span className="text-amber-500 ml-1">(partial)</span>}
                   </div>
                   <div className="font-mono font-bold text-sm text-blue-400">
@@ -175,11 +167,11 @@ export function SpendTrendChart({
                   {pt.change !== 0 && (
                     <div style={{ color: changeColor }} className="font-mono text-[11px]">
                       {changeSign}
-                      {pt.changePct.toFixed(0)}% vs prev day
+                      {pt.changePct.toFixed(0)}% vs prev {hourly ? "hour" : "day"}
                     </div>
                   )}
                   <div className="font-mono text-[11px] text-amber-500/80">
-                    avg ${Math.round(avg).toLocaleString()}{" "}
+                    avg {fmtDollars(avg)}{" "}
                     <span style={{ color: pt.spend > avg ? "#ef4444" : "#22c55e" }}>
                       ({pt.spend > avg ? "+" : ""}
                       {(((pt.spend - avg) / avg) * 100).toFixed(0)}%)
@@ -226,16 +218,6 @@ export function SpendTrendChart({
               );
             }}
           />
-          {dimEndIdx != null && (
-            <ReferenceArea
-              yAxisId="spend"
-              x1={0}
-              x2={dimEndIdx}
-              fill="#18181b"
-              fillOpacity={0.6}
-              strokeOpacity={0}
-            />
-          )}
           {cycleLines.map((x, k) => (
             <ReferenceLine
               key={k}
@@ -254,7 +236,7 @@ export function SpendTrendChart({
             strokeDasharray="4 4"
             strokeWidth={1}
             label={{
-              value: `avg $${Math.round(avg).toLocaleString()}`,
+              value: `avg ${fmtDollars(avg)}`,
               position: "insideTopRight",
               fill: "#f59e0b",
               fontSize: 10,
