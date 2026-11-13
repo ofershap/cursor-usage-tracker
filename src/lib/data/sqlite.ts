@@ -1310,6 +1310,10 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     })),
     teamDailySpend,
     dailySpendBreakdown,
+    planExhaustion: getPlanExhaustionStats().users.map((u) => ({
+      email: u.email,
+      days_to_exhaust: u.days_to_exhaust,
+    })),
   };
 }
 
