@@ -470,11 +470,13 @@ export function DashboardClient({ initialData: data, initialRange: range }: Dash
           value={fmt(filteredAgentRequests)}
           sub={`~${fmt(Math.round(filteredAgentRequests / (days || 1)))}/day`}
         />
-        <Kpi
-          label={`Lines (${timeLabel})`}
-          value={fmt(filteredLinesAdded)}
-          sub={`~${fmt(Math.round(filteredLinesAdded / (days || 1)))}/day`}
-        />
+        {range !== 1 && (
+          <Kpi
+            label={`Lines (${timeLabel})`}
+            value={fmt(filteredLinesAdded)}
+            sub={`~${fmt(Math.round(filteredLinesAdded / (days || 1)))}/day`}
+          />
+        )}
       </div>
 
       {/* Search result banner */}

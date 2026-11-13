@@ -201,7 +201,11 @@ const BADGE_STYLES: Record<string, { label: string; color: string; tooltip: stri
 export function UserDetailClient({ email, stats, initialRange: range }: UserDetailClientProps) {
   const currentSpend = stats.spending[0];
   const timeLabel = formatTimeLabel(range);
-  const totalAgentRequests = stats.dailyActivity.reduce((sum, d) => sum + d.agent_requests, 0);
+  // the 24h range counts the usage events of each hour, daily activity cannot start at an exact hour
+  const totalAgentRequests =
+    range === 1
+      ? stats.dailySpend.reduce((sum, d) => sum + (d.requests ?? 0), 0)
+      : stats.dailyActivity.reduce((sum, d) => sum + d.agent_requests, 0);
   const cycleStart = currentSpend?.cycle_start;
   const windowSpendDollars = stats.windowSpendCents / 100;
   const dollarsPerReq =

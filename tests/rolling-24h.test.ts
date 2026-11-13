@@ -67,6 +67,17 @@ describe("24h range is a rolling window with hourly bars", () => {
     expect(chart.reduce((sum, r) => sum + r.spend_cents, 0)).toBe(1000 + 600);
   });
 
+  it("counts requests and active members from the events of the last 24 hours", () => {
+    freeze("2026-11-13T14:41:00Z");
+    const { stats } = sqlite.getFullDashboard(1);
+    expect(stats.totalAgentRequests).toBe(4); // b: 2, c: 2 (its event at 14:30 yesterday is out)
+    expect(stats.activeMembers).toBe(2);
+    expect(stats.rankedUsers.find((u) => u.email === "c@x.com")?.agent_requests).toBe(2);
+    // the user page counts the same events, hour by hour
+    const hours = sqlite.getUserStats("c@x.com", 1).dailySpend;
+    expect(hours.reduce((sum, r) => sum + (r.requests ?? 0), 0)).toBe(2);
+  });
+
   it("is unaffected by a daylight saving change in the local time zone", () => {
     const tz = process.env.TZ;
     process.env.TZ = "Europe/Paris";

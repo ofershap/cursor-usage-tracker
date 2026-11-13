@@ -1101,18 +1101,34 @@ export function getFullDashboard(range: TimeRange = 7): FullDashboard {
       ? billing.cycleStartMs
       : Date.parse(`${since}T00:00:00.000Z`);
 
+  // daily activity cannot start at an exact hour: the 24h range counts usage events instead,
+  // so requests and active members cover the same window as the spend
+  const eventRequests = hourly
+    ? new Map(
+        (
+          db
+            .prepare(
+              `SELECT user_email as email, COUNT(*) as n FROM usage_events
+               WHERE is_chargeable = 1 AND CAST(timestamp AS INTEGER) >= ? GROUP BY user_email`,
+            )
+            .all(sinceMs) as Array<{ email: string; n: number }>
+        ).map((r) => [r.email, r.n]),
+      )
+    : null;
+
   const totalMembers =
     (db.prepare("SELECT COUNT(*) as c FROM members WHERE is_removed = 0").get() as { c: number })
       ?.c ?? 0;
 
-  const activeMembers =
-    (
-      db
-        .prepare(
-          "SELECT COUNT(DISTINCT email) as c FROM daily_usage WHERE is_active = 1 AND date >= ?",
-        )
-        .get(since) as { c: number }
-    )?.c ?? 0;
+  const activeMembers = eventRequests
+    ? eventRequests.size
+    : ((
+        db
+          .prepare(
+            "SELECT COUNT(DISTINCT email) as c FROM daily_usage WHERE is_active = 1 AND date >= ?",
+          )
+          .get(since) as { c: number }
+      )?.c ?? 0);
 
   const windowSpend = spendSince(db, sinceMs);
   const chartSpend = hourly ? spendSince(db, sinceMs, true) : windowSpend;
@@ -1136,11 +1152,13 @@ export function getFullDashboard(range: TimeRange = 7): FullDashboard {
 
   const spendRow = { total: totalSpendCentsForWindow };
 
-  const agentRow = db
-    .prepare(
-      "SELECT COALESCE(SUM(agent_requests), 0) as total FROM daily_usage WHERE date >= ?",
-    )
-    .get(since) as { total: number };
+  const agentRow = eventRequests
+    ? { total: [...eventRequests.values()].reduce((sum, n) => sum + n, 0) }
+    : (db
+        .prepare(
+          "SELECT COALESCE(SUM(agent_requests), 0) as total FROM daily_usage WHERE date >= ?",
+        )
+        .get(since) as { total: number });
 
   const activeAnomalies =
     (
@@ -1232,10 +1250,18 @@ export function getFullDashboard(range: TimeRange = 7): FullDashboard {
   }>;
 
   const rankedUsers = rankedRows
-    .map((u) => ({ ...u, spend_cents: windowSpend.totals.get(u.email) ?? 0 }))
+    .map((u) => ({
+      ...u,
+      spend_cents: windowSpend.totals.get(u.email) ?? 0,
+      // lines are only kept per day
+      ...(eventRequests && { agent_requests: eventRequests.get(u.email) ?? 0, lines_added: 0 }),
+    }))
     .sort((x, y) => y.spend_cents - x.spend_cents);
   for (const u of rankedUsers) {
     u.spend_rank = 1 + rankedUsers.filter((o) => o.spend_cents > u.spend_cents).length;
+    if (eventRequests) {
+      u.activity_rank = 1 + rankedUsers.filter((o) => o.agent_requests > u.agent_requests).length;
+    }
   }
 
   let teamDailySpend: Array<{ date: string; spend_cents: number }> = [];
@@ -1328,7 +1354,9 @@ export function getFullDashboard(range: TimeRange = 7): FullDashboard {
         users: mc.users,
         avg_spend: Math.round(spend / 100 / Math.max(1, mc.users)),
         total_spend: Math.round(spend / 100),
-        total_reqs: mc.total_reqs,
+        total_reqs: eventRequests
+          ? emails.reduce((sum, e) => sum + (eventRequests.get(e) ?? 0), 0)
+          : mc.total_reqs,
         emails,
       };
     })
@@ -1727,7 +1755,7 @@ export function getUserStats(email: string, range: TimeRange = 7) {
             `SELECT strftime('%Y-%m-%dT%H', CAST(timestamp AS INTEGER) / 1000, 'unixepoch') as hour,
                COUNT(*) as n
              FROM usage_events
-             WHERE user_email = ? AND CAST(timestamp AS INTEGER) >= ?
+             WHERE user_email = ? AND is_chargeable = 1 AND CAST(timestamp AS INTEGER) >= ?
              GROUP BY hour`,
           )
           .all(email, sinceMs) as Array<{ hour: string; n: number }>
