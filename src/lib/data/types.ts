@@ -55,6 +55,7 @@ export interface DashboardStats {
 
 export interface FullDashboard {
   days: number;
+  range: number | "cycle";
   stats: DashboardStats;
   modelCosts: Array<{
     model: string;
@@ -66,6 +67,7 @@ export interface FullDashboard {
   }>;
   teamDailySpend: Array<{ date: string; spend_cents: number }>;
   dailySpendBreakdown: Array<{ date: string; email: string; name: string; spend_cents: number }>;
+  cycleStarts: string[];
 }
 
 export interface ModelEfficiency {

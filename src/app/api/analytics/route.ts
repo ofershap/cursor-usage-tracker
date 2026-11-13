@@ -12,6 +12,7 @@ import {
   getUsersByClientVersion,
   getPlanExhaustionStats,
   getModelEfficiency,
+  getCycleWindowDays,
   getGroupsWithMembers,
   getRepoAIAttribution,
 } from "@/lib/data";
@@ -39,7 +40,8 @@ function resolveGroupEmails(group: string): string[] | undefined {
 
 export function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const days = parseInt(searchParams.get("days") ?? "30", 10);
+  const param = searchParams.get("days") ?? "30";
+  const days = param === "cycle" ? getCycleWindowDays() : parseInt(param, 10) || 30;
   const group = searchParams.get("group") ?? "all";
   const emails = resolveGroupEmails(group);
 
@@ -56,7 +58,7 @@ export function GET(request: Request) {
       clientVersions: getAnalyticsClientVersionsSummary(),
       versionUsers: getUsersByClientVersion(),
       planExhaustion: getPlanExhaustionStats(emails),
-      modelEfficiency: getModelEfficiency(emails),
+      modelEfficiency: getModelEfficiency(emails, days),
       repoAttribution: getRepoAIAttribution(days, emails),
     });
   } catch {
