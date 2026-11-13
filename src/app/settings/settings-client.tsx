@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { DetectionConfig } from "@/lib/types";
+import { isRestricted, type DetectionConfig } from "@/lib/types";
+import { RoleBadge, useViewer } from "@/components/access";
 
 interface MemberInfo {
   email: string;
   name: string;
+  role: string;
 }
 
 interface GroupData {
@@ -22,6 +24,7 @@ interface SettingsClientProps {
 }
 
 export function SettingsClient({ config: initial }: SettingsClientProps) {
+  const readOnly = isRestricted(useViewer(), "settings.actions");
   const [config, setConfig] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -69,17 +72,19 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
         </div>
         <div className="flex items-center gap-3">
           {saved && <span className="text-green-400 text-xs animate-pulse">Saved</span>}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white rounded-md transition-colors text-xs font-medium"
-          >
-            {saving ? "Saving..." : "Save Settings"}
-          </button>
+          {!readOnly && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white rounded-md transition-colors text-xs font-medium"
+            >
+              {saving ? "Saving..." : "Save Settings"}
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <fieldset disabled={readOnly} className="grid min-w-0 grid-cols-1 lg:grid-cols-2 gap-3">
         <Section title="Static Thresholds" description="Hard limits per user. Set to 0 to disable.">
           <Field
             label="Max spend / cycle"
@@ -304,9 +309,9 @@ export function SettingsClient({ config: initial }: SettingsClientProps) {
             />
           )}
         </Section>
-      </div>
+      </fieldset>
 
-      <BillingGroupsManager />
+      <BillingGroupsManager readOnly={readOnly} />
     </div>
   );
 }
@@ -343,7 +348,7 @@ interface ImportPreview {
   applied?: number;
 }
 
-function BillingGroupsManager() {
+function BillingGroupsManager({ readOnly }: { readOnly: boolean }) {
   const [groups, setGroups] = useState<GroupData[]>([]);
   const [filter, setFilter] = useState("unassigned");
   const [search, setSearch] = useState("");
@@ -561,14 +566,16 @@ function BillingGroupsManager() {
             onClick={() => setShowBackup(true)}
             className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded-md text-[11px] font-medium transition-colors"
           >
-            Import / Export
+            {readOnly ? "Export" : "Import / Export"}
           </button>
-          <button
-            onClick={() => setShowImport(true)}
-            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[11px] font-medium transition-colors"
-          >
-            Import from HiBob
-          </button>
+          {!readOnly && (
+            <button
+              onClick={() => setShowImport(true)}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[11px] font-medium transition-colors"
+            >
+              Import from HiBob
+            </button>
+          )}
         </div>
       </div>
 
@@ -609,17 +616,19 @@ function BillingGroupsManager() {
                   <>
                     <span>{g.name}</span>
                     <span className="text-zinc-600">({g.member_count})</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingId(g.id);
-                        setEditName(g.name);
-                      }}
-                      className="text-zinc-600 hover:text-zinc-400 ml-0.5"
-                      title="Rename group"
-                    >
-                      edit
-                    </button>
+                    {!readOnly && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingId(g.id);
+                          setEditName(g.name);
+                        }}
+                        className="text-zinc-600 hover:text-zinc-400 ml-0.5"
+                        title="Rename group"
+                      >
+                        edit
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -661,12 +670,14 @@ function BillingGroupsManager() {
                 </button>
               </form>
             ) : (
-              <button
-                onClick={() => setShowNewGroup(true)}
-                className="flex items-center gap-0.5 border border-dashed border-zinc-600 rounded px-2 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-300 hover:border-zinc-500 transition-colors"
-              >
-                + New group
-              </button>
+              !readOnly && (
+                <button
+                  onClick={() => setShowNewGroup(true)}
+                  className="flex items-center gap-0.5 border border-dashed border-zinc-600 rounded px-2 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-300 hover:border-zinc-500 transition-colors"
+                >
+                  + New group
+                </button>
+              )
             )}
           </div>
         </div>
@@ -713,8 +724,9 @@ function BillingGroupsManager() {
             <tr className="text-zinc-500 border-b border-zinc-800">
               <th className="text-left py-1.5 px-2 font-medium">Name</th>
               <th className="text-left py-1.5 px-2 font-medium">Email</th>
+              <th className="text-left py-1.5 px-2 font-medium">Role</th>
               <th className="text-left py-1.5 px-2 font-medium">Current Group</th>
-              <th className="text-right py-1.5 px-2 font-medium">Reassign to</th>
+              {!readOnly && <th className="text-right py-1.5 px-2 font-medium">Reassign to</th>}
             </tr>
           </thead>
           <tbody>
@@ -724,29 +736,34 @@ function BillingGroupsManager() {
                 <tr key={member.email} className="border-b border-zinc-800/30 hover:bg-zinc-800/30">
                   <td className="py-1 px-2 text-zinc-200">{member.name || "—"}</td>
                   <td className="py-1 px-2 text-zinc-400 font-mono">{member.email}</td>
-                  <td className="py-1 px-2 text-zinc-500">{currentGroup?.name ?? "—"}</td>
-                  <td className="py-1 px-2 text-right">
-                    <select
-                      disabled={busy}
-                      defaultValue=""
-                      onChange={(e) => {
-                        if (e.target.value) handleAssign(member.email, e.target.value);
-                        e.target.value = "";
-                      }}
-                      className="bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-[10px] text-zinc-300 focus:outline-none"
-                    >
-                      <option value="" disabled>
-                        Assign...
-                      </option>
-                      {groups
-                        .filter((g) => g.id !== currentGroup?.id)
-                        .map((g) => (
-                          <option key={g.id} value={g.id}>
-                            {g.name}
-                          </option>
-                        ))}
-                    </select>
+                  <td className="py-1 px-2">
+                    <RoleBadge role={member.role} />
                   </td>
+                  <td className="py-1 px-2 text-zinc-500">{currentGroup?.name ?? "—"}</td>
+                  {!readOnly && (
+                    <td className="py-1 px-2 text-right">
+                      <select
+                        disabled={busy}
+                        defaultValue=""
+                        onChange={(e) => {
+                          if (e.target.value) handleAssign(member.email, e.target.value);
+                          e.target.value = "";
+                        }}
+                        className="bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-[10px] text-zinc-300 focus:outline-none"
+                      >
+                        <option value="" disabled>
+                          Assign...
+                        </option>
+                        {groups
+                          .filter((g) => g.id !== currentGroup?.id)
+                          .map((g) => (
+                            <option key={g.id} value={g.id}>
+                              {g.name}
+                            </option>
+                          ))}
+                      </select>
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -1091,16 +1108,18 @@ function BillingGroupsManager() {
                   >
                     Export
                   </button>
-                  <button
-                    onClick={() => setBackupTab("import")}
-                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
-                      backupTab === "import"
-                        ? "bg-zinc-700 text-zinc-100"
-                        : "text-zinc-500 hover:text-zinc-300"
-                    }`}
-                  >
-                    Import
-                  </button>
+                  {!readOnly && (
+                    <button
+                      onClick={() => setBackupTab("import")}
+                      className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                        backupTab === "import"
+                          ? "bg-zinc-700 text-zinc-100"
+                          : "text-zinc-500 hover:text-zinc-300"
+                      }`}
+                    >
+                      Import
+                    </button>
+                  )}
                 </div>
               </div>
               <button

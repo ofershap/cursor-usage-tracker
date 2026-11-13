@@ -66,6 +66,7 @@ export interface FullDashboard {
   }>;
   teamDailySpend: Array<{ date: string; spend_cents: number }>;
   dailySpendBreakdown: Array<{ date: string; email: string; name: string; spend_cents: number }>;
+  planExhaustion: Array<{ email: string; days_to_exhaust: number }>;
 }
 
 export interface ModelEfficiency {

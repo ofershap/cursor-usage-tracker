@@ -445,6 +445,31 @@ When both are set, either match grants access. When neither is set, any Google a
 - Sign-in page appears automatically when auth is enabled
 - User avatar and sign-out menu appear in the nav bar
 
+### Access Control
+
+Optionally align dashboard permissions with Cursor roles. It is off by default. The role is read from Cursor using the sign-in email.
+
+```bash
+RESTRICTED_FEATURES=settings,anomalies.actions,user-details
+AUTH_UNRESTRICTED_EMAILS=cto@example.com  # optional, lifts the restriction for identified emails, members or not in Cursor (the displayed role is unchanged)
+```
+
+- `RESTRICTED_FEATURES` is a comma-separated list of features reserved to unrestricted users. A value also restricts its dotted sub-values:
+
+| Value               | Restricts                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------- |
+| `insights`          | The Insights page                                                                       |
+| `anomalies`         | The Anomalies page                                                                      |
+| `anomalies.actions` | Acknowledge and Resolve                                                                 |
+| `user-details`      | Other members' detail pages (links greyed out), the person's own page stays available   |
+| `settings`          | The Settings page and its API                                                           |
+| `settings.actions`  | Settings becomes read-only: save, group management, HiBob import and restore are hidden |
+| `*.actions`         | Every `.actions` value: `anomalies.actions` and `settings.actions`                      |
+
+- Cursor `owner` and `free-owner` (plus the emails above) are never restricted, without changing the role displayed
+- Cursor `member`, emails with no Cursor account and anonymous visitors (no sign-in) are restricted
+- Nothing is restricted when the list is empty
+
 ---
 
 ## API Endpoints

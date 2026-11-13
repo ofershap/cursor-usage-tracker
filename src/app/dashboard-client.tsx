@@ -97,22 +97,13 @@ export function DashboardClient({ initialData }: DashboardClientProps) {
       const [minStr, maxStr] = exhaustionParam.split("-");
       const min = parseInt(minStr ?? "0", 10);
       const max = parseInt(maxStr ?? "999", 10);
-      fetch("/api/analytics")
-        .then((r) => r.json())
-        .then(
-          (analytics: {
-            planExhaustion?: { users: Array<{ email: string; days_to_exhaust: number }> };
-          }) => {
-            const matching = (analytics.planExhaustion?.users ?? []).filter(
-              (u) => u.days_to_exhaust >= min && u.days_to_exhaust <= max,
-            );
-            setExhaustionFilter({
-              label: `Plan exhausted day ${min}–${max}`,
-              emails: new Set(matching.map((u) => u.email)),
-            });
-          },
-        )
-        .catch(() => {});
+      const matching = initialData.planExhaustion.filter(
+        (u) => u.days_to_exhaust >= min && u.days_to_exhaust <= max,
+      );
+      setExhaustionFilter({
+        label: `Plan exhausted day ${min}–${max}`,
+        emails: new Set(matching.map((u) => u.email)),
+      });
     }
     const saved = localStorage.getItem("dashboard-days");
     if (saved) {

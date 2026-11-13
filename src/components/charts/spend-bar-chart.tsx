@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import { canViewUser } from "@/lib/types";
+import { useViewer } from "@/components/access";
 import {
   BarChart,
   Bar,
@@ -37,6 +39,7 @@ const HIGHLIGHT_HOVER_COLOR = "#fbbf24";
 
 export function SpendBarChart({ data, highlightEmail, expanded }: SpendBarChartProps) {
   const router = useRouter();
+  const viewer = useViewer();
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   const limit = expanded ? 15 : 8;
@@ -50,9 +53,10 @@ export function SpendBarChart({ data, highlightEmail, expanded }: SpendBarChartP
 
   const handleBarClick = useCallback(
     (entry: (typeof chartData)[number]) => {
-      router.push(`/users/${encodeURIComponent(entry.email)}`);
+      if (canViewUser(viewer, entry.email))
+        router.push(`/users/${encodeURIComponent(entry.email)}`);
     },
-    [router],
+    [router, viewer],
   );
 
   const getFill = (entry: (typeof chartData)[number], index: number) => {

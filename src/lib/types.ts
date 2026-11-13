@@ -1,3 +1,21 @@
+export const isOwnerRole = (role?: string) => role === "owner" || role === "free-owner";
+
+export interface Viewer {
+  email: string | null;
+  restricted: string[];
+}
+
+export const isRestricted = (viewer: Viewer, feature: string) =>
+  viewer.restricted.some(
+    (r) =>
+      feature === r ||
+      feature.startsWith(`${r}.`) ||
+      (r.startsWith("*.") && feature.endsWith(r.slice(1))),
+  );
+
+export const canViewUser = (viewer: Viewer, email: string) =>
+  !isRestricted(viewer, "user-details") || viewer.email === email.toLowerCase();
+
 export interface TeamMember {
   name: string;
   email: string;

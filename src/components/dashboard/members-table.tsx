@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { UserLink } from "@/components/access";
 import { useState, useRef, useEffect } from "react";
 import type { RankedUser, UsageBadge, SpendBadge, ContextBadge, AdoptionBadge } from "@/lib/data";
 import type { SortColumn } from "@/app/dashboard-client";
@@ -441,12 +441,9 @@ export function MembersTable({
                       : rankBadge(row.spend_rank)}
                   </td>
                   <td className="px-4 py-2.5 font-medium whitespace-nowrap">
-                    <Link
-                      href={`/users/${encodeURIComponent(row.email)}`}
-                      className="hover:text-blue-300 transition-colors"
-                    >
+                    <UserLink email={row.email} className="hover:text-blue-300 transition-colors">
                       {row.name}
-                    </Link>
+                    </UserLink>
                   </td>
                   <td className="px-4 py-2.5 text-zinc-400 text-xs whitespace-nowrap">
                     {row.email}
@@ -570,12 +567,12 @@ export function MembersTable({
                     </div>
                   </td>
                   <td className="text-right px-4 py-2.5">
-                    <Link
-                      href={`/users/${encodeURIComponent(row.email)}`}
+                    <UserLink
+                      email={row.email}
                       className="text-xs text-zinc-500 hover:text-zinc-300"
                     >
                       →
-                    </Link>
+                    </UserLink>
                   </td>
                 </tr>
               );
