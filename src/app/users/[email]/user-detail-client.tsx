@@ -16,6 +16,7 @@ import type { UsageBadge, SpendBadge, ContextBadge, AdoptionBadge } from "@/lib/
 
 interface UserStats {
   windowSpendCents: number;
+  cycleStarts: string[];
   member:
     | { name: string; email: string; role: string; first_seen: string; last_seen: string }
     | undefined;
@@ -313,6 +314,7 @@ export function UserDetailClient({ email, stats, initialRange: range }: UserDeta
         <ExpandableCard>
           <SpendTrendChart
             avgPerDay={dailyAvgSpend}
+            cycleStarts={stats.cycleStarts}
             data={stats.dailySpend.map((d) => {
               const activity = stats.dailyActivity.find((a) => a.date === d.date);
               return {

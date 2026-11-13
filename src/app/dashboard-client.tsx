@@ -493,6 +493,7 @@ export function DashboardClient({ initialData: data, initialRange: range }: Dash
             data={filteredTeamDailySpend}
             selectedDays={days}
             avgPerDay={filteredSpendCents / 100 / (days || 1)}
+            cycleStarts={data.cycleStarts}
           />
         </ExpandableCard>
         <ExpandableCard>
@@ -522,7 +523,11 @@ export function DashboardClient({ initialData: data, initialRange: range }: Dash
           )}
         </ExpandableCard>
         <ExpandableCard>
-          <DailySpendChart data={dailySpendData} onNameClick={(name) => setSearch(name)} />
+          <DailySpendChart
+            data={dailySpendData}
+            onNameClick={(name) => setSearch(name)}
+            cycleStarts={data.cycleStarts}
+          />
         </ExpandableCard>
       </div>
 

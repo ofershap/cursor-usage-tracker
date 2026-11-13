@@ -21,10 +21,10 @@
 
 ### Charts
 
-- **Daily Spend Trend** — area chart with avg line, provisional zone (last 2d), spike detection
+- **Daily Spend Trend** — area chart with avg line, provisional zone (last 2d), cycle change marker, spike detection
 - **Model Cost Comparison** — table with $/request, relative multiplier (1x–8x+), color-coded
 - **Top Spenders** — horizontal bar chart, top 8
-- **Daily Spend by User** — stacked bar, top 6 + Others, clickable legend
+- **Daily Spend by User** — stacked bar, top 6 + Others, clickable legend, cycle change marker
 
 ### Members Table
 
