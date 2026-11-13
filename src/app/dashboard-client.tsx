@@ -522,6 +522,13 @@ export function DashboardClient({ initialData: data, initialRange: range }: Dash
       {/* ── Charts ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <ExpandableCard>
+          <DailySpendChart
+            data={dailySpendData}
+            onNameClick={(name) => setSearch(name)}
+            cycleStarts={data.cycleStarts}
+          />
+        </ExpandableCard>
+        <ExpandableCard>
           {(exp) => (
             <SpendBarChart
               data={filteredUsers.slice(0, 20)}
@@ -531,13 +538,6 @@ export function DashboardClient({ initialData: data, initialRange: range }: Dash
               range={range}
             />
           )}
-        </ExpandableCard>
-        <ExpandableCard>
-          <DailySpendChart
-            data={dailySpendData}
-            onNameClick={(name) => setSearch(name)}
-            cycleStarts={data.cycleStarts}
-          />
         </ExpandableCard>
       </div>
 
