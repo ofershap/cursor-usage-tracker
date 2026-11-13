@@ -116,6 +116,7 @@ describe("routeFeature", () => {
     expect(routeFeature("/settings", "GET")).toBe("settings");
     expect(routeFeature("/api/groups/export", "GET")).toBe("settings");
     expect(routeFeature("/insights", "GET")).toBe("insights");
+    expect(routeFeature("/api/analytics", "GET")).toBe("insights");
     expect(routeFeature("/anomalies", "GET")).toBe("anomalies");
     expect(routeFeature("/api/anomalies", "GET")).toBe("anomalies");
     expect(routeFeature("/users/a%40x.com", "GET")).toBe("user-details");
@@ -136,7 +137,6 @@ describe("routeFeature", () => {
     const { routeFeature } = await import("@/lib/access");
     expect(routeFeature("/api/groups", "GET")).toBeNull();
     expect(routeFeature("/api/stats", "GET")).toBeNull();
-    expect(routeFeature("/api/analytics", "GET")).toBeNull();
     expect(routeFeature("/", "GET")).toBeNull();
   });
 

@@ -27,17 +27,23 @@ export function getViewer(email?: string | null) {
 }
 
 export function routeFeature(pathname: string, method: string) {
-  if (/^\/(api\/)?users\//.test(pathname)) return "user-details";
-  if (pathname === "/insights") return "insights";
-  if (pathname === "/anomalies" || pathname === "/api/anomalies") return "anomalies";
-  if (pathname.startsWith("/api/incidents") && method !== "GET") return "anomalies.actions";
-  if (
-    pathname.startsWith("/settings") ||
-    pathname.startsWith("/api/settings") ||
-    pathname.startsWith("/api/groups/") ||
-    (pathname === "/api/groups" && method !== "GET")
-  ) {
-    return method === "GET" ? "settings" : "settings.actions";
+  switch (true) {
+    case /^\/(api\/)?users\//.test(pathname):
+      return "user-details";
+    case pathname === "/insights":
+    case pathname === "/api/analytics":
+      return "insights";
+    case pathname === "/anomalies":
+    case pathname === "/api/anomalies":
+      return "anomalies";
+    case pathname.startsWith("/api/incidents") && method !== "GET":
+      return "anomalies.actions";
+    case pathname.startsWith("/settings"):
+    case pathname.startsWith("/api/settings"):
+    case pathname.startsWith("/api/groups/"):
+    case pathname === "/api/groups" && method !== "GET":
+      return method === "GET" ? "settings" : "settings.actions";
+    default:
+      return null;
   }
-  return null;
 }
