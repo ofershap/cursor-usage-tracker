@@ -6,16 +6,23 @@ export function formatDateShort(dateStr: string): string {
   return `${day} ${dateStr.slice(5)}`;
 }
 
+// the 24h range keys its points by hour ("2026-11-09T14", UTC)
+export const isHourKey = (key: string) => key.length === 13;
+
+// the 24h charts tick every 3 hours on fixed clock hours (0h, 3h, 6h...) so the marks stay stable
+export const isTickHour = (key: string) => Number(key.slice(11)) % 3 === 0;
+
 export function formatDateTick(dateStr: string): string {
+  if (isHourKey(dateStr)) return `${dateStr.slice(11)}h`;
   const d = new Date(dateStr + "T00:00:00");
   const day = DAYS[d.getDay()] ?? "";
   return `${day} ${dateStr.slice(8)}`;
 }
 
 export function formatDateLabel(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00");
-  const day = DAYS[d.getDay()] ?? "";
-  return `${day}, ${dateStr}`;
+  const date = dateStr.slice(0, 10);
+  const day = DAYS[new Date(`${date}T00:00:00`).getDay()] ?? "";
+  return isHourKey(dateStr) ? `${day}, ${date} ${dateStr.slice(11)}:00 UTC` : `${day}, ${dateStr}`;
 }
 
 export function timeAgo(dateStr: string): string {

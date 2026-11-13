@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import type { RankedUser, UsageBadge, SpendBadge, ContextBadge, AdoptionBadge } from "@/lib/data";
 import type { SortColumn } from "@/app/dashboard-client";
 import { shortModel } from "@/lib/format-utils";
+import { userHref, type TimeRange } from "@/lib/time-range";
 
 interface MembersTableProps {
   data: RankedUser[];
@@ -13,6 +15,7 @@ interface MembersTableProps {
   onSort: (col: SortColumn) => void;
   highlightEmail?: string;
   timeLabel: string;
+  range: TimeRange;
   badgeFilter: string | null;
   onBadgeFilter: (badge: string | null) => void;
 }
@@ -293,9 +296,11 @@ export function MembersTable({
   onSort,
   highlightEmail,
   timeLabel,
+  range,
   badgeFilter,
   onBadgeFilter,
 }: MembersTableProps) {
+  const router = useRouter();
   const sortLabel =
     sortCol === "spend"
       ? "Spend"
@@ -375,14 +380,14 @@ export function MembersTable({
                 className="text-right px-4 py-3 font-medium cursor-pointer hover:text-zinc-300 select-none"
                 onClick={() => onSort("spend")}
               >
-                <span title="Full billing cycle spend">Spend (cycle)</span>
+                <span title="Spend over the selected time range">Spend</span>
                 <SortIcon active={sortCol === "spend"} asc={sortAsc} />
               </th>
               <th
                 className="text-right px-4 py-3 font-medium cursor-pointer hover:text-zinc-300 select-none"
                 onClick={() => onSort("reqs")}
               >
-                <span title={`Agent requests in the last ${timeLabel}`}>Reqs ({timeLabel})</span>
+                <span title={`Agent requests in the last ${timeLabel}`}>Reqs</span>
                 <SortIcon active={sortCol === "reqs"} asc={sortAsc} />
               </th>
               <th
@@ -392,7 +397,7 @@ export function MembersTable({
                 <span
                   title={`Total lines added in editor — includes AI, manual typing, paste, refactoring (last ${timeLabel})`}
                 >
-                  Lines ({timeLabel})
+                  Lines
                 </span>
                 <SortIcon active={sortCol === "lines"} asc={sortAsc} />
               </th>
@@ -400,7 +405,9 @@ export function MembersTable({
                 className="text-right px-4 py-3 font-medium cursor-pointer hover:text-zinc-300 select-none"
                 onClick={() => onSort("cpr")}
               >
-                <span title="Cost per agent request (cycle spend / total requests)">$/req</span>
+                <span title="Cost per agent request (spend / requests over the selected time range)">
+                  $/req
+                </span>
                 <SortIcon active={sortCol === "cpr"} asc={sortAsc} />
               </th>
               <th className="text-right px-4 py-3 font-medium">Model</th>
@@ -414,7 +421,7 @@ export function MembersTable({
               </th>
               <th className="text-center px-4 py-3 font-medium">
                 <span
-                  title="$N = Spend rank (by billing cycle spend) · AN = Activity rank (by agent requests)"
+                  title="$N = Spend rank · AN = Activity rank (by agent requests)"
                   className="cursor-help border-b border-dashed border-zinc-600"
                 >
                   Ranks
@@ -429,7 +436,11 @@ export function MembersTable({
               return (
                 <tr
                   key={row.email}
-                  className={`border-b border-zinc-800/50 transition-colors ${
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest("a, button")) return;
+                    router.push(userHref(row.email, range));
+                  }}
+                  className={`border-b border-zinc-800/50 transition-colors cursor-pointer group ${
                     isHighlighted
                       ? "bg-blue-500/10 ring-1 ring-blue-500/30"
                       : "hover:bg-zinc-800/30"
@@ -442,7 +453,7 @@ export function MembersTable({
                   </td>
                   <td className="px-4 py-2.5 font-medium whitespace-nowrap">
                     <Link
-                      href={`/users/${encodeURIComponent(row.email)}`}
+                      href={userHref(row.email, range)}
                       className="hover:text-blue-300 transition-colors"
                     >
                       {row.name}
@@ -557,7 +568,7 @@ export function MembersTable({
                     <div className="flex items-center justify-center gap-1.5">
                       <span
                         className="bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-mono"
-                        title={`${ordinal(row.spend_rank)} highest spender this billing cycle`}
+                        title={`${ordinal(row.spend_rank)} highest spender (${timeLabel})`}
                       >
                         ${row.spend_rank}
                       </span>
@@ -571,8 +582,8 @@ export function MembersTable({
                   </td>
                   <td className="text-right px-4 py-2.5">
                     <Link
-                      href={`/users/${encodeURIComponent(row.email)}`}
-                      className="text-xs text-zinc-500 hover:text-zinc-300"
+                      href={userHref(row.email, range)}
+                      className="text-xs text-zinc-500 group-hover:text-zinc-300 transition-colors"
                     >
                       →
                     </Link>

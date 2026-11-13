@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import { userHref, type TimeRange } from "@/lib/time-range";
 import {
   BarChart,
   Bar,
@@ -18,6 +19,8 @@ interface SpendBarChartProps {
   data: Array<{ email: string; name: string; spend_cents: number; spend_rank: number }>;
   highlightEmail?: string;
   expanded?: boolean;
+  timeLabel: string;
+  range: TimeRange;
 }
 
 const TOOLTIP_STYLE = {
@@ -35,7 +38,13 @@ const BAR_HOVER_COLOR = "#60a5fa";
 const HIGHLIGHT_COLOR = "#f59e0b";
 const HIGHLIGHT_HOVER_COLOR = "#fbbf24";
 
-export function SpendBarChart({ data, highlightEmail, expanded }: SpendBarChartProps) {
+export function SpendBarChart({
+  data,
+  highlightEmail,
+  expanded,
+  timeLabel,
+  range,
+}: SpendBarChartProps) {
   const router = useRouter();
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
@@ -50,7 +59,7 @@ export function SpendBarChart({ data, highlightEmail, expanded }: SpendBarChartP
 
   const handleBarClick = useCallback(
     (entry: (typeof chartData)[number]) => {
-      router.push(`/users/${encodeURIComponent(entry.email)}`);
+      router.push(userHref(entry.email, range));
     },
     [router],
   );
@@ -67,7 +76,7 @@ export function SpendBarChart({ data, highlightEmail, expanded }: SpendBarChartP
       className={`bg-zinc-900 rounded-lg border border-zinc-800 p-4 ${expanded ? "h-full flex flex-col" : ""}`}
     >
       <h3 className="text-xs font-medium text-zinc-400 mb-2 shrink-0">
-        Top Spenders (Current Cycle)
+        Top Spenders ({timeLabel})
       </h3>
       <div className={expanded ? "flex-1 min-h-0" : ""}>
         <ResponsiveContainer width="100%" height={expanded ? "100%" : chartData.length * 28 + 36}>

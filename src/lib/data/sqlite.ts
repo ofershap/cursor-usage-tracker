@@ -959,22 +959,127 @@ export type {
   CycleSummaryData,
 };
 
-export function getFullDashboard(days: number = 7): FullDashboard {
+export type TimeRange = number | "cycle";
+
+const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
+
+function dayStart(daysAgo: number): string {
+  return new Date(Date.now() - daysAgo * DAY_MS).toISOString().slice(0, 10);
+}
+
+// the 24h range measures exactly the last 24 hours...
+const last24HoursStart = () => Date.now() - 24 * HOUR_MS;
+
+// ...and charts it one point per hour, keyed "YYYY-MM-DDTHH" (UTC), from the hour of the cutoff
+// to the current hour (25 points, both ends partial)
+const chartHourKeys = (sinceMs: number) =>
+  Array.from({ length: 25 }, (_, i) => new Date(sinceMs + i * HOUR_MS).toISOString().slice(0, 13));
+
+// Number of days back from today that lands on the start of the current billing cycle.
+export function getCycleWindowDays(): number {
+  const row = getDb().prepare("SELECT MAX(cycle_start) as cs FROM spending").get() as {
+    cs: string | null;
+  };
+  const start = (row?.cs ?? getMetadata("cycle_start"))?.slice(0, 10);
+  if (!start) return 30;
+  const elapsed = Date.parse(`${dayStart(0)}T00:00:00.000Z`) - Date.parse(`${start}T00:00:00.000Z`);
+  return Math.max(1, Math.round(elapsed / DAY_MS));
+}
+
+function getCycleStarts(db: Database.Database): string[] {
+  return (
+    db.prepare("SELECT DISTINCT cycle_start FROM spending ORDER BY cycle_start").all() as Array<{
+      cycle_start: string;
+    }>
+  ).map((r) => r.cycle_start);
+}
+
+// Spend per user is billed per cycle, so a window is estimated by sharing each cycle's billed
+// total across the usage events that fall inside the window.
+function spendSince(db: Database.Database, sinceMs: number, hourly = false) {
+  const bucket = hourly
+    ? "strftime('%Y-%m-%dT%H', CAST(timestamp AS INTEGER) / 1000, 'unixepoch')"
+    : "date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch')";
+  const names = new Map(
+    (db.prepare("SELECT email, name FROM members").all() as Array<{ email: string; name: string }>).map(
+      (m) => [m.email, m.name],
+    ),
+  );
+  const totals = new Map<string, number>();
+  const daily: Array<{ date: string; email: string; name: string; spend_cents: number }> = [];
+  const starts = getCycleStarts(db);
+  const now = Date.now();
+
+  starts.forEach((start, i) => {
+    const startMs = Date.parse(`${start}T12:00:00.000Z`);
+    const next = starts[i + 1];
+    const endMs = next ? Date.parse(`${next}T12:00:00.000Z`) : Number.MAX_SAFE_INTEGER;
+    if (endMs <= sinceMs) return;
+
+    const billed = db
+      .prepare("SELECT email, spend_cents FROM spending WHERE cycle_start = ?")
+      .all(start) as Array<{ email: string; spend_cents: number }>;
+    const rawByUser = new Map(
+      (
+        db
+          .prepare(
+            `SELECT user_email as email, SUM(total_cents) as t FROM usage_events
+             WHERE CAST(timestamp AS INTEGER) >= ? AND CAST(timestamp AS INTEGER) < ?
+             GROUP BY user_email`,
+          )
+          .all(startMs, endMs) as Array<{ email: string; t: number }>
+      ).map((r) => [r.email, r.t]),
+    );
+    const from = Math.max(startMs, sinceMs);
+    const rawDays = db
+      .prepare(
+        `SELECT user_email as email, ${bucket} as date,
+           SUM(total_cents) as t
+         FROM usage_events
+         WHERE CAST(timestamp AS INTEGER) >= ? AND CAST(timestamp AS INTEGER) < ?
+         GROUP BY user_email, date`,
+      )
+      .all(from, endMs) as Array<{ email: string; date: string; t: number }>;
+
+    const billedBy = new Map(billed.map((b) => [b.email, b.spend_cents]));
+    const windowRaw = new Map<string, number>();
+    for (const r of rawDays) {
+      windowRaw.set(r.email, (windowRaw.get(r.email) ?? 0) + r.t);
+      const spend = billedBy.get(r.email) ?? 0;
+      const rawTotal = rawByUser.get(r.email) ?? 0;
+      if (spend > 0 && rawTotal > 0) {
+        daily.push({
+          date: r.date,
+          email: r.email,
+          name: names.get(r.email) ?? r.email,
+          spend_cents: Math.round((r.t * spend) / rawTotal),
+        });
+      }
+    }
+
+    const coveredEnd = Math.min(now, endMs);
+    const share = Math.min(1, Math.max(0, (coveredEnd - from) / Math.max(1, coveredEnd - startMs)));
+    for (const { email, spend_cents } of billed) {
+      if (spend_cents <= 0) continue;
+      const rawTotal = rawByUser.get(email) ?? 0;
+      const part =
+        sinceMs <= startMs
+          ? spend_cents
+          : rawTotal > 0
+            ? ((windowRaw.get(email) ?? 0) * spend_cents) / rawTotal
+            : spend_cents * share;
+      totals.set(email, (totals.get(email) ?? 0) + part);
+    }
+  });
+
+  for (const [email, v] of totals) totals.set(email, Math.round(v));
+  daily.sort((x, y) => x.date.localeCompare(y.date) || y.spend_cents - x.spend_cents);
+  return { totals, daily };
+}
+
+export function getFullDashboard(range: TimeRange = 7): FullDashboard {
   const db = getDb();
-  const dateFilter = `-${days} days`;
-
-  const totalMembers =
-    (db.prepare("SELECT COUNT(*) as c FROM members WHERE is_removed = 0").get() as { c: number })
-      ?.c ?? 0;
-
-  const activeMembers =
-    (
-      db
-        .prepare(
-          "SELECT COUNT(DISTINCT email) as c FROM daily_usage WHERE is_active = 1 AND date >= date('now', ?)",
-        )
-        .get(dateFilter) as { c: number }
-    )?.c ?? 0;
 
   const cycleRow = db.prepare("SELECT MAX(cycle_start) as cycle_start FROM spending").get() as {
     cycle_start: string | null;
@@ -982,12 +1087,51 @@ export function getFullDashboard(days: number = 7): FullDashboard {
   const cycleStart =
     getMetadata("cycle_start") ?? cycleRow?.cycle_start ?? new Date().toISOString().slice(0, 10);
   const cycleEnd = getMetadata("cycle_end") ?? "";
-  const cycleDays = Math.max(
-    1,
-    Math.ceil((Date.now() - new Date(cycleStart).getTime()) / 86_400_000),
-  );
+  const cycleDays = Math.max(1, Math.ceil((Date.now() - new Date(cycleStart).getTime()) / DAY_MS));
 
   const billing = cycleBillingAnchor(db);
+
+  const days = range === "cycle" ? cycleDays : range;
+  const since = range === "cycle" ? (billing?.cycleStart ?? cycleStart).slice(0, 10) : dayStart(days);
+  // the 24h range spends over the last 24 hours, not since yesterday's midnight
+  const hourly = range === 1;
+  const sinceMs = hourly
+    ? last24HoursStart()
+    : range === "cycle" && billing
+      ? billing.cycleStartMs
+      : Date.parse(`${since}T00:00:00.000Z`);
+
+  // daily activity cannot start at an exact hour: the 24h range counts usage events instead,
+  // so requests and active members cover the same window as the spend
+  const eventRequests = hourly
+    ? new Map(
+        (
+          db
+            .prepare(
+              `SELECT user_email as email, COUNT(*) as n FROM usage_events
+               WHERE is_chargeable = 1 AND CAST(timestamp AS INTEGER) >= ? GROUP BY user_email`,
+            )
+            .all(sinceMs) as Array<{ email: string; n: number }>
+        ).map((r) => [r.email, r.n]),
+      )
+    : null;
+
+  const totalMembers =
+    (db.prepare("SELECT COUNT(*) as c FROM members WHERE is_removed = 0").get() as { c: number })
+      ?.c ?? 0;
+
+  const activeMembers = eventRequests
+    ? eventRequests.size
+    : ((
+        db
+          .prepare(
+            "SELECT COUNT(DISTINCT email) as c FROM daily_usage WHERE is_active = 1 AND date >= ?",
+          )
+          .get(since) as { c: number }
+      )?.c ?? 0);
+
+  const windowSpend = spendSince(db, sinceMs);
+  const chartSpend = hourly ? spendSince(db, sinceMs, true) : windowSpend;
 
   const dailySpendWindowFromGroups = () =>
     (
@@ -995,46 +1139,26 @@ export function getFullDashboard(days: number = 7): FullDashboard {
         .prepare(
           `SELECT COALESCE(SUM(spend), 0) as total FROM (
             SELECT date, email, MAX(spend_cents) as spend FROM daily_spend
-            WHERE date >= date('now', ?) GROUP BY date, email
+            WHERE date >= ? GROUP BY date, email
           )`,
         )
-        .get(dateFilter) as { total: number }
+        .get(since) as { total: number }
     ).total;
 
-  let totalSpendCentsForWindow: number;
-  if (billing && billing.teamBilledCents > 0) {
-    const fullRaw = (
-      db
-        .prepare(
-          `SELECT COALESCE(SUM(total_cents), 0) as t FROM usage_events WHERE CAST(timestamp AS INTEGER) >= ?`,
-        )
-        .get(billing.cycleStartMs) as { t: number }
-    ).t;
-    if (fullRaw > 0) {
-      const windowRaw = (
-        db
-          .prepare(
-            `SELECT COALESCE(SUM(total_cents), 0) as t FROM usage_events
-             WHERE CAST(timestamp AS INTEGER) >= ?
-               AND date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') >= date('now', ?)`,
-          )
-          .get(billing.cycleStartMs, dateFilter) as { t: number }
-      ).t;
-      totalSpendCentsForWindow = Math.round((billing.teamBilledCents * windowRaw) / fullRaw);
-    } else {
-      totalSpendCentsForWindow = dailySpendWindowFromGroups();
-    }
-  } else {
-    totalSpendCentsForWindow = dailySpendWindowFromGroups();
-  }
+  const totalSpendCentsForWindow =
+    billing && billing.teamBilledCents > 0
+      ? [...windowSpend.totals.values()].reduce((sum, v) => sum + v, 0)
+      : dailySpendWindowFromGroups();
 
   const spendRow = { total: totalSpendCentsForWindow };
 
-  const agentRow = db
-    .prepare(
-      "SELECT COALESCE(SUM(agent_requests), 0) as total FROM daily_usage WHERE date >= date('now', ?)",
-    )
-    .get(dateFilter) as { total: number };
+  const agentRow = eventRequests
+    ? { total: [...eventRequests.values()].reduce((sum, n) => sum + n, 0) }
+    : (db
+        .prepare(
+          "SELECT COALESCE(SUM(agent_requests), 0) as total FROM daily_usage WHERE date >= ?",
+        )
+        .get(since) as { total: number });
 
   const activeAnomalies =
     (
@@ -1050,29 +1174,24 @@ export function getFullDashboard(days: number = 7): FullDashboard {
         SUM(lines_added) as total_lines_added,
         COUNT(DISTINCT CASE WHEN is_active = 1 THEN email END) as active_users
        FROM daily_usage
-       WHERE date >= date('now', ?)
+       WHERE date >= ?
        GROUP BY date ORDER BY date`,
     )
-    .all(dateFilter) as Array<{
+    .all(since) as Array<{
     date: string;
     total_agent_requests: number;
     total_lines_added: number;
     active_users: number;
   }>;
 
-  const rankedUsers = db
+  const rankedRows = db
     .prepare(
-      `WITH user_spend AS (
-          SELECT email, spend_cents
-          FROM spending
-          WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)
-        ),
-        user_cache AS (
+      `WITH user_cache AS (
           SELECT user_email as email,
             ROUND(AVG(CASE WHEN cache_read_tokens > 0 THEN cache_read_tokens END)) as avg_cache_read,
             ROUND(100.0 * SUM(CASE WHEN max_mode = 1 THEN 1 ELSE 0 END) / COUNT(*)) as max_mode_pct
           FROM usage_events
-          WHERE date(timestamp/1000, 'unixepoch') >= date('now', ?)
+          WHERE date(timestamp/1000, 'unixepoch') >= ?
           GROUP BY user_email
         ),
         activity AS (
@@ -1086,12 +1205,12 @@ export function getFullDashboard(days: number = 7): FullDashboard {
             COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_days,
             MAX(most_used_model) as most_used_model
           FROM daily_usage
-          WHERE date >= date('now', ?) AND is_active = 1
+          WHERE date >= ? AND is_active = 1
           GROUP BY email
         )
         SELECT
           m.email, m.name,
-          COALESCE(us.spend_cents, 0) as spend_cents,
+          0 as spend_cents,
           0 as included_spend_cents, 0 as fast_premium_requests,
           COALESCE(a.agent_requests, 0) as agent_requests,
           COALESCE(a.lines_added, 0) as lines_added,
@@ -1103,16 +1222,14 @@ export function getFullDashboard(days: number = 7): FullDashboard {
           COALESCE(a.total_accepts, 0) as total_accepts,
           COALESCE(uc.avg_cache_read, 0) as avg_cache_read,
           COALESCE(uc.max_mode_pct, 0) as max_mode_pct,
-          RANK() OVER (ORDER BY COALESCE(us.spend_cents, 0) DESC) as spend_rank,
+          0 as spend_rank,
           RANK() OVER (ORDER BY COALESCE(a.agent_requests, 0) DESC) as activity_rank
         FROM members m
-        LEFT JOIN user_spend us ON m.email = us.email
         LEFT JOIN user_cache uc ON m.email = uc.email
         LEFT JOIN activity a ON m.email = a.email
-        WHERE m.is_removed = 0
-        ORDER BY COALESCE(us.spend_cents, 0) DESC`,
+        WHERE m.is_removed = 0`,
     )
-    .all(dateFilter, dateFilter) as Array<{
+    .all(since, since) as Array<{
     email: string;
     name: string;
     spend_cents: number;
@@ -1132,34 +1249,32 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     activity_rank: number;
   }>;
 
-  const chartDays = Math.max(days, 7);
-  const chartDateFilter = `-${chartDays} days`;
+  const rankedUsers = rankedRows
+    .map((u) => ({
+      ...u,
+      spend_cents: windowSpend.totals.get(u.email) ?? 0,
+      // lines are only kept per day
+      ...(eventRequests && { agent_requests: eventRequests.get(u.email) ?? 0, lines_added: 0 }),
+    }))
+    .sort((x, y) => y.spend_cents - x.spend_cents);
+  for (const u of rankedUsers) {
+    u.spend_rank = 1 + rankedUsers.filter((o) => o.spend_cents > u.spend_cents).length;
+    if (eventRequests) {
+      u.activity_rank = 1 + rankedUsers.filter((o) => o.agent_requests > u.agent_requests).length;
+    }
+  }
 
   let teamDailySpend: Array<{ date: string; spend_cents: number }> = [];
   if (billing && billing.teamBilledCents > 0) {
-    const fullRaw = (
-      db
-        .prepare(
-          `SELECT COALESCE(SUM(total_cents), 0) as t FROM usage_events WHERE CAST(timestamp AS INTEGER) >= ?`,
-        )
-        .get(billing.cycleStartMs) as { t: number }
-    ).t;
-    const rawByDay = db
-      .prepare(
-        `SELECT date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') as date,
-          SUM(total_cents) as raw_cents
-         FROM usage_events
-         WHERE CAST(timestamp AS INTEGER) >= ?
-           AND date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') >= date('now', ?)
-         GROUP BY date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch')
-         ORDER BY date`,
-      )
-      .all(billing.cycleStartMs, chartDateFilter) as Array<{ date: string; raw_cents: number }>;
-    if (fullRaw > 0) {
-      const f = billing.teamBilledCents / fullRaw;
-      teamDailySpend = rawByDay.map((r) => ({
-        date: r.date,
-        spend_cents: Math.round(r.raw_cents * f),
+    const byDate = new Map<string, number>();
+    for (const r of chartSpend.daily) {
+      byDate.set(r.date, (byDate.get(r.date) ?? 0) + r.spend_cents);
+    }
+    teamDailySpend = [...byDate].map(([date, spend_cents]) => ({ date, spend_cents }));
+    if (hourly && teamDailySpend.length > 0) {
+      teamDailySpend = chartHourKeys(sinceMs).map((date) => ({
+        date,
+        spend_cents: byDate.get(date) ?? 0,
       }));
     }
   }
@@ -1169,62 +1284,14 @@ export function getFullDashboard(days: number = 7): FullDashboard {
         `
     SELECT date, SUM(spend) as spend_cents FROM (
       SELECT date, email, MAX(spend_cents) as spend FROM daily_spend
-      WHERE date >= date('now', ?) GROUP BY date, email
+      WHERE date >= ? GROUP BY date, email
     ) GROUP BY date ORDER BY date
   `,
       )
-      .all(chartDateFilter) as Array<{ date: string; spend_cents: number }>;
+      .all(since) as Array<{ date: string; spend_cents: number }>;
   }
 
-  let dailySpendBreakdown: Array<{
-    date: string;
-    email: string;
-    name: string;
-    spend_cents: number;
-  }> = [];
-  if (billing && billing.teamBilledCents > 0) {
-    dailySpendBreakdown = db
-      .prepare(
-        `
-    WITH cb AS (
-      SELECT email, spend_cents FROM spending
-      WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)
-    ),
-    ur AS (
-      SELECT user_email as email, SUM(total_cents) as tr
-      FROM usage_events
-      WHERE CAST(timestamp AS INTEGER) >= ?
-      GROUP BY user_email
-    ),
-    dr AS (
-      SELECT user_email, date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') as date,
-        SUM(total_cents) as rd
-      FROM usage_events
-      WHERE CAST(timestamp AS INTEGER) >= ?
-        AND date(CAST(timestamp AS INTEGER) / 1000, 'unixepoch') >= date('now', ?)
-      GROUP BY user_email, date
-    )
-    SELECT x.date, x.email, x.name, x.spend_cents FROM (
-      SELECT dr.date, dr.user_email as email, COALESCE(m.name, dr.user_email) as name,
-        CASE WHEN COALESCE(ur.tr, 0) > 0 AND COALESCE(cb.spend_cents, 0) > 0
-          THEN CAST(ROUND(dr.rd * cb.spend_cents * 1.0 / ur.tr) AS INTEGER)
-          ELSE 0 END as spend_cents
-      FROM dr
-      LEFT JOIN ur ON ur.email = dr.user_email
-      LEFT JOIN cb ON cb.email = dr.user_email
-      LEFT JOIN members m ON m.email = dr.user_email
-    ) x
-    WHERE x.spend_cents > 0
-    ORDER BY x.date, x.spend_cents DESC
-  `,
-      )
-      .all(billing.cycleStartMs, billing.cycleStartMs, chartDateFilter) as Array<{
-      date: string;
-      email: string;
-      name: string;
-      spend_cents: number;
-    }>;
-  }
+  let dailySpendBreakdown = billing && billing.teamBilledCents > 0 ? chartSpend.daily : [];
   if (dailySpendBreakdown.length === 0) {
     dailySpendBreakdown = db
       .prepare(
@@ -1235,7 +1302,7 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     FROM (
       SELECT date, email, MAX(spend_cents) as spend_cents
       FROM daily_spend
-      WHERE date >= date('now', ?)
+      WHERE date >= ?
       GROUP BY date, email
     ) ds
     LEFT JOIN members m ON ds.email = m.email
@@ -1243,7 +1310,7 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     ORDER BY ds.date, ds.spend_cents DESC
   `,
       )
-      .all(chartDateFilter) as Array<{
+      .all(since) as Array<{
       date: string;
       email: string;
       name: string;
@@ -1251,42 +1318,49 @@ export function getFullDashboard(days: number = 7): FullDashboard {
     }>;
   }
 
-  const modelCosts = db
+  const modelRows = db
     .prepare(
       `
     WITH user_model AS (
       SELECT email, most_used_model, SUM(agent_requests) as reqs
-      FROM daily_usage WHERE is_active = 1 AND most_used_model != '' AND date >= date('now', ?)
+      FROM daily_usage WHERE is_active = 1 AND most_used_model != '' AND date >= ?
       GROUP BY email, most_used_model
     ),
     primary_model AS (
       SELECT email, most_used_model FROM user_model
       WHERE (email, reqs) IN (SELECT email, MAX(reqs) FROM user_model GROUP BY email)
-    ),
-    user_spend AS (
-      SELECT email, spend_cents FROM spending
-      WHERE cycle_start = (SELECT MAX(cycle_start) FROM spending)
     )
     SELECT pm.most_used_model as model, COUNT(*) as users,
-      ROUND(AVG(COALESCE(us.spend_cents, 0))/100, 0) as avg_spend,
-      ROUND(SUM(COALESCE(us.spend_cents, 0))/100, 0) as total_spend,
       COALESCE(SUM(du.reqs), 0) as total_reqs,
       GROUP_CONCAT(pm.email) as emails
     FROM primary_model pm
-    LEFT JOIN user_spend us ON pm.email = us.email
-    LEFT JOIN (SELECT email, SUM(agent_requests) as reqs FROM daily_usage WHERE date >= date('now', ?) GROUP BY email) du ON pm.email = du.email
+    LEFT JOIN (SELECT email, SUM(agent_requests) as reqs FROM daily_usage WHERE date >= ? GROUP BY email) du ON pm.email = du.email
     GROUP BY pm.most_used_model
-    ORDER BY total_spend DESC
   `,
     )
-    .all(dateFilter, dateFilter) as Array<{
+    .all(since, since) as Array<{
     model: string;
     users: number;
-    avg_spend: number;
-    total_spend: number;
     total_reqs: number;
-    emails: string;
+    emails: string | null;
   }>;
+
+  const modelCosts = modelRows
+    .map((mc) => {
+      const emails = mc.emails ? mc.emails.split(",") : [];
+      const spend = emails.reduce((sum, e) => sum + (windowSpend.totals.get(e) ?? 0), 0);
+      return {
+        model: mc.model,
+        users: mc.users,
+        avg_spend: Math.round(spend / 100 / Math.max(1, mc.users)),
+        total_spend: Math.round(spend / 100),
+        total_reqs: eventRequests
+          ? emails.reduce((sum, e) => sum + (eventRequests.get(e) ?? 0), 0)
+          : mc.total_reqs,
+        emails,
+      };
+    })
+    .sort((x, y) => y.total_spend - x.total_spend);
 
   const stats: DashboardStats = {
     totalMembers,
@@ -1303,13 +1377,12 @@ export function getFullDashboard(days: number = 7): FullDashboard {
 
   return {
     days,
+    range,
     stats,
-    modelCosts: modelCosts.map((mc) => ({
-      ...mc,
-      emails: mc.emails ? mc.emails.split(",") : [],
-    })),
+    modelCosts,
     teamDailySpend,
     dailySpendBreakdown,
+    cycleStarts: getCycleStarts(db),
   };
 }
 
@@ -1597,8 +1670,16 @@ export function getDashboardStats(days: number = 7): DashboardStats {
   return getFullDashboard(days).stats;
 }
 
-export function getUserStats(email: string, days: number = 7) {
+export function getUserStats(email: string, range: TimeRange = 7) {
   const db = getDb();
+  const days = range === "cycle" ? getCycleWindowDays() : range;
+  const sinceMs =
+    range === 1
+      ? last24HoursStart()
+      : ((range === "cycle" ? cycleBillingAnchor(db)?.cycleStartMs : undefined) ??
+        Date.parse(`${dayStart(days)}T00:00:00.000Z`));
+  const windowSpend = spendSince(db, sinceMs);
+  const windowSpendCents = windowSpend.totals.get(email) ?? 0;
 
   const member = db.prepare("SELECT * FROM members WHERE email = ?").get(email) as
     | (TeamMember & { first_seen: string; last_seen: string })
@@ -1652,7 +1733,47 @@ export function getUserStats(email: string, days: number = 7) {
     .prepare(`${ANOMALY_SELECT} WHERE user_email = ? ORDER BY detected_at DESC LIMIT 20`)
     .all(email) as Anomaly[];
 
-  const dailySpend = getUserDailySpend(email);
+  const hourly = range === 1;
+  const firstDate = new Date(sinceMs).toISOString().slice(0, 10);
+  const spendByDate = new Map(
+    (hourly ? spendSince(db, sinceMs, true) : windowSpend).daily
+      .filter((r) => r.email === email)
+      .map((r) => [r.date, r.spend_cents]),
+  );
+  if (spendByDate.size === 0 && !hourly) {
+    for (const d of getUserDailySpend(email)) {
+      if (d.date >= firstDate) spendByDate.set(d.date, d.spend_cents);
+    }
+  }
+  const dailySpend: Array<{ date: string; spend_cents: number; requests?: number }> = [];
+  if (hourly) {
+    // activity is only kept per day, so the hourly $/req counts the usage events of each hour
+    const requestsByHour = new Map(
+      (
+        db
+          .prepare(
+            `SELECT strftime('%Y-%m-%dT%H', CAST(timestamp AS INTEGER) / 1000, 'unixepoch') as hour,
+               COUNT(*) as n
+             FROM usage_events
+             WHERE user_email = ? AND is_chargeable = 1 AND CAST(timestamp AS INTEGER) >= ?
+             GROUP BY hour`,
+          )
+          .all(email, sinceMs) as Array<{ hour: string; n: number }>
+      ).map((r) => [r.hour, r.n]),
+    );
+    for (const date of chartHourKeys(sinceMs)) {
+      dailySpend.push({
+        date,
+        spend_cents: spendByDate.get(date) ?? 0,
+        requests: requestsByHour.get(date),
+      });
+    }
+  } else {
+    for (let t = Date.parse(`${firstDate}T00:00:00.000Z`); t <= Date.now(); t += DAY_MS) {
+      const date = new Date(t).toISOString().slice(0, 10);
+      dailySpend.push({ date, spend_cents: spendByDate.get(date) ?? 0 });
+    }
+  }
   const billCycleStart = spending[0]?.cycle_start ?? null;
   const usageEventsSummaryRaw = getUserUsageEventsSummary(email, days, billCycleStart);
   const billedCents = spending[0]?.spend_cents ?? 0;
@@ -1771,6 +1892,8 @@ export function getUserStats(email: string, days: number = 7) {
     aiAdoption,
     planExhaustion,
     repoBreakdown,
+    windowSpendCents,
+    cycleStarts: getCycleStarts(db),
   };
 }
 
@@ -2291,7 +2414,7 @@ export function getUsersByClientVersion(): Record<string, Array<{ email: string;
   return result;
 }
 
-export function getModelEfficiency(emails?: string[]): ModelEfficiency[] {
+export function getModelEfficiency(emails?: string[], days: number = 30): ModelEfficiency[] {
   const db = getDb();
   const emailFilter = emails?.length ? `AND du.email IN (${emails.map(() => "?").join(",")})` : "";
   const params = emails?.length ? [...emails] : [];
@@ -2326,12 +2449,13 @@ export function getModelEfficiency(emails?: string[]): ModelEfficiency[] {
       AND du.most_used_model != ''
       AND du.agent_requests > 0
       AND ds.spend_cents > 0
+      AND du.date >= date('now', ?)
       ${emailFilter}
     GROUP BY du.most_used_model
     HAVING COUNT(DISTINCT du.email) >= ${emails?.length ? "1" : "3"} AND SUM(ds.spend_cents) >= ${emails?.length ? "0" : "2000"}
     ORDER BY total_spend_usd DESC`,
     )
-    .all(...params, ...params) as ModelEfficiency[];
+    .all(...params, `-${days} days`, ...params) as ModelEfficiency[];
 }
 
 export function getAllMembers(): Array<TeamMember & { first_seen: string; last_seen: string }> {
